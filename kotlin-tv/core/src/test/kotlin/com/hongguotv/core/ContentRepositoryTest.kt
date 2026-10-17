@@ -329,6 +329,7 @@ class ContentRepositoryTest {
     @Test fun emptyAppResponseFallsBackToTheCompleteTypeSpecificPublicCatalog() {
         val repo=repository { request ->
             if(request.url.host.contains("fqnovel")) "" else {
+                if(request.url.encodedPath.startsWith("/search/")) return@repository websiteResults()
                 assertEquals("/category/comic-drama",request.url.encodedPath)
                 assertNull(request.url.queryParameter("sort_type"))
                 val page=request.url.queryParameter("page")?.toInt() ?: 1
@@ -344,6 +345,57 @@ class ContentRepositoryTest {
         assertTrue(first.items.map { it.id }.intersect(second.items.map { it.id }.toSet()).isEmpty())
     }
 
+    private fun websiteResults(vararg rows: JSONObject) = "<script>_ROUTER_DATA="+JSONObject().put("loaderData",
+        JSONObject().put("search_(keyword)/page",JSONObject().put("isSuccess",true).put("searchList",JSONArray(rows.toList()))))+";</script>"
+
+    @Test fun emptyResponseFindsSeasonFourteenOutsideTheCategoryCatalogWithoutMixingTypes() {
+        val repo=repository { request ->
+            when {
+                request.url.host.contains("fqnovel") -> ""
+                request.url.encodedPath.startsWith("/search/") -> websiteResults(
+                    JSONObject().put("video_data",JSONObject().put("series_id","7696437705822981182")
+                        .put("series_title","聚宝仙盆之杂灵根才是真BOSS第十四季").put("episode_cnt",222).put("genre","205")),
+                    JSONObject().put("video_data",JSONObject().put("series_id","7498612570866076734")
+                        .put("series_title","聚宝仙盆").put("episode_cnt",80).put("genre","203")))
+                else -> """<script>_ROUTER_DATA={"loaderData":{"category_$":{"recommendList":[{"series_id":"1","series_name":"其他剧集"}],"pagination":{"totalPages":1,"pageNum":1}}}};</script>"""
+            }
+        }
+        val comic=repo.search("聚宝仙盆第十四季",type=ContentType.COMIC)
+        assertEquals(listOf("7696437705822981182"),comic.items.map { it.id })
+        assertEquals("全 222 集",comic.items.single().badge)
+        assertFalse(comic.hasMore)
+        val short=repo.search("聚宝仙盆",type=ContentType.SHORT)
+        assertEquals(listOf("7498612570866076734"),short.items.map { it.id })
+    }
+
+    @Test fun keywordSupplementAndCatalogKeepStablePagesAndDeduplicateSeries() {
+        var keywordReads=0
+        val repo=repository { request ->
+            when {
+                request.url.host.contains("fqnovel") -> ""
+                request.url.encodedPath.startsWith("/search/") -> {
+                    keywordReads++
+                    websiteResults(JSONObject().put("video_data",JSONObject().put("series_id","99")
+                        .put("series_title","修仙之新篇").put("genre","205")),
+                        JSONObject().put("video_data",JSONObject().put("series_id","1")
+                            .put("series_title","修仙旧篇1").put("genre","205")))
+                }
+                else -> {
+                    val rows=JSONArray((1..25).map { JSONObject().put("series_id","$it").put("series_name","修仙旧篇$it") })
+                    "<script>_ROUTER_DATA="+JSONObject().put("loaderData",JSONObject().put("category_$",
+                        JSONObject().put("recommendList",rows).put("pagination",JSONObject().put("totalPages",1).put("pageNum",1))))+";</script>"
+                }
+            }
+        }
+        val first=repo.search("修仙",1,ContentType.COMIC)
+        val second=repo.search("修仙",2,ContentType.COMIC)
+        assertEquals(24,first.items.size); assertTrue(first.hasMore)
+        assertEquals(2,second.items.size); assertFalse(second.hasMore)
+        val ids=(first.items+second.items).map { it.id }
+        assertEquals(26,ids.toSet().size); assertTrue("99" in ids)
+        assertEquals(1,keywordReads)
+    }
+
     @Test fun publicCatalogFailureDoesNotReturnAPartialSetAsComplete() {
         val repo=repository { request ->
             if(request.url.host.contains("fqnovel")) ""
@@ -357,6 +409,7 @@ class ContentRepositoryTest {
         var failed=true; var firstReads=0
         val repo=repository { request ->
             if(request.url.host.contains("fqnovel")) "" else {
+                if(request.url.encodedPath.startsWith("/search/")) return@repository websiteResults()
                 val page=request.url.queryParameter("page")?.toInt() ?: 1
                 if(page==1) firstReads++
                 if(page==2 && failed) throw IOException("offline")

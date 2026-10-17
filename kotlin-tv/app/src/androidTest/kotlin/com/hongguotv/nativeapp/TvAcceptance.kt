@@ -19,9 +19,10 @@ class TvAcceptance: Instrumentation() {
     private lateinit var activity: Activity
     private val report=StringBuilder()
     private var largeOnly=false
+    private var searchOnly=false
     private var record=false
     private var recording: android.os.ParcelFileDescriptor?=null
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); largeOnly=arguments?.getString("scope")=="large"; record=arguments?.getString("record")=="true"; start() }
+    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); largeOnly=arguments?.getString("scope")=="large"; searchOnly=arguments?.getString("scope")=="search-regression"; record=arguments?.getString("record")=="true"; start() }
     private fun views(view: View): List<View> = listOf(view)+(if(view is ViewGroup) (0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList())
     private fun all()=views(activity.window.decorView)
     private fun label(value: String)=all().filterIsInstance<TextView>().first { it.text.toString()==value && it.isFocusable && it.isShown }
@@ -66,6 +67,33 @@ class TvAcceptance: Instrumentation() {
     override fun onStart() {
         try {
             activity=startActivitySync(Intent(Intent.ACTION_MAIN).setClassName(targetContext,"com.hongguotv.nativeapp.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if(searchOnly) {
+                await("initial home") { homeReady() }
+                ui { label("搜索").performClick(); label("漫剧").performClick() }
+                for(query in listOf("聚宝仙盆第十四季","聚宝仙盆")) {
+                    ui {
+                        all().filterIsInstance<EditText>().single().setText(query)
+                        all().filterIsInstance<TextView>().last { it.text.toString()=="搜索" && it.isFocusable }.performClick()
+                    }
+                    await("season fourteen results: $query") { "7696437705822981182" in cardIds() }
+                    check(ui { cardIds().size<=24 })
+                    report.append("PASS: $query finds season fourteen; "+ui {
+                        all().filterIsInstance<TextView>().first { it.text.toString().startsWith("找到 ") }.text
+                    }+"\n")
+                }
+                ui { all().first { it.tag=="7696437705822981182" }.requestFocus() }
+                await("season fourteen cover") { views(all().first { it.tag=="7696437705822981182" }).filterIsInstance<ImageView>().any { it.drawable!=null } }
+                snapshot("search-season-fourteen")
+                key(KeyEvent.KEYCODE_DPAD_CENTER)
+                await("season fourteen detail") { all().filterIsInstance<TextView>().any { it.text.toString().startsWith("222 集") } }
+                snapshot("detail-season-fourteen")
+                key(KeyEvent.KEYCODE_BACK)
+                await("season fourteen search restored") { "7696437705822981182" in cardIds() }
+                check(ui { activity.currentFocus?.tag=="7696437705822981182" })
+                report.append("PASS: D-pad opens correct 222-episode detail and restores search selection\n")
+                finish(Activity.RESULT_OK,Bundle().apply { putString("report",report.toString()) })
+                return
+            }
             var blocked=false
             if(!largeOnly) {
                 await("initial home") { homeReady() }

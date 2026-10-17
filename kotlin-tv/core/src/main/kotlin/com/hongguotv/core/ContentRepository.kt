@@ -32,7 +32,8 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
     private data class SearchCursor(val searchId: String, val passback: String, val offset: Int?, val updatedAt: Long)
     private val searchCursors=linkedMapOf<Triple<ContentType,String,Int>,SearchCursor>()
     private val websiteSearches=linkedMapOf<Pair<ContentType,String>,Long>()
-    private val catalogSearches=linkedMapOf<Pair<ContentType,String>,Long>()
+    private data class CatalogSearch(val touched: Long, val candidates: List<Series>, val keywordAvailable: Boolean)
+    private val catalogSearches=linkedMapOf<Pair<ContentType,String>,CatalogSearch>()
     private class TitleCatalog(var touched: Long) {
         val items=linkedMapOf<String,Series>()
         var nextPage=1
@@ -99,11 +100,11 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         require(keyword.isNotBlank() && keyword.length<=80 && page in 1..100)
         val key=type to keyword
         val catalogSource=synchronized(catalogSearches) {
-            catalogSearches.entries.removeAll { clock()-it.value>300_000 || (page==1 && it.key==key) }
+            catalogSearches.entries.removeAll { clock()-it.value.touched>300_000 || (page==1 && it.key==key) }
             key in catalogSearches
         }
         if(catalogSource) return catalogTitleSearch(keyword,page,type,progress)
-        // A valid empty comic tab is authoritative; only an empty HTTP body uses the public catalog.
+        // A valid empty comic tab is authoritative; only an empty HTTP body uses public search.
         if(type==ContentType.COMIC) return try { appSearch(keyword,page,type) } catch(e: EmptySearchResponseException) {
             RequestScope.ensureActive(); if(page>1) throw e; catalogTitleSearch(keyword,page,type,progress)
         }
@@ -128,7 +129,21 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         val totalPages=section.optJSONObject("pagination")?.optInt("totalPages",100) ?: 100
         return CatalogPage(items,items.isNotEmpty() && page<minOf(totalPages,100))
     }
+    private fun websiteKeywordCandidates(keyword: String,type: ContentType): List<Series> {
+        val data=router("$site/search/${Signer.encode(keyword)}?page=1")
+        val section=data.optJSONObject("search_(keyword)/page") ?: data.optJSONObject("search_page") ?: throw IOException("搜索数据暂不可用")
+        if(section.has("isSuccess") && !section.optBoolean("isSuccess")) throw IOException("官网关键词搜索暂不可用")
+        val rows=section.optJSONArray("searchList") ?: throw IOException("搜索数据结构已变化")
+        val genre=if(type==ContentType.COMIC) "205" else "203"
+        return valid(rows.objects().filter { (it.optJSONObject("video_data") ?: it).str("genre")==genre }.map(::card))
+    }
     @Synchronized private fun catalogTitleSearch(keyword: String,page: Int,type: ContentType,progress: ((Int)->Unit)?): CatalogPage {
+        val key=type to keyword
+        val supplement=synchronized(catalogSearches) { catalogSearches[key] } ?: try {
+            CatalogSearch(clock(),websiteKeywordCandidates(keyword,type),true)
+        } catch(e: Exception) {
+            RequestScope.ensureActive(); CatalogSearch(clock(),emptyList(),false)
+        }
         val index=titleCatalogs[type]?.takeIf { clock()-it.touched in 0..600_000 }
             ?: TitleCatalog(clock()).also { titleCatalogs[type]=it }
         while(!index.complete) {
@@ -142,13 +157,15 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
             progress?.invoke(index.items.size)
         }
         val items=index.items.values.toList()
-        val matches=items.filter { SearchCatalog.relevance(it,keyword)<4 }.sortedBy { SearchCatalog.relevance(it,keyword) }
+        // Keyword search can find new seasons absent from category pages and abbreviated titles.
+        val matches=valid(supplement.candidates+items.filter { SearchCatalog.relevance(it,keyword)<4 })
+            .sortedBy { SearchCatalog.relevance(it,keyword) }
         synchronized(catalogSearches) {
-            catalogSearches[type to keyword]=clock()
+            catalogSearches[key]=supplement.copy(touched=clock())
             while(catalogSearches.size>6) catalogSearches.remove(catalogSearches.keys.first())
         }
         return CatalogPage(matches.drop((page-1)*24).take(24),page*24<matches.size,
-            notice="官网片库 · 已检索 ${items.size} 部")
+            notice=(if(supplement.keywordAvailable) "官网关键词搜索＋公开片库" else "关键词搜索暂不可用 · 官网片库")+" · 已检索 ${items.size} 部")
     }
     private fun appSearch(keyword: String, page: Int, type: ContentType): CatalogPage {
         val values=VendorConstants.device.toMutableMap()
