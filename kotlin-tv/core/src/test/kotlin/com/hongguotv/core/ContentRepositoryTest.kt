@@ -66,6 +66,27 @@ class ContentRepositoryTest {
         assertEquals("720P",repo.stream("123",720).quality)
     }
 
+    @Test fun actualShortEdgeOverridesQualityLabelsForPortraitAndLandscapeVideo() {
+        for(portrait in listOf(true,false)) {
+            val repo=repository { request ->
+                if(request.url.host=="example.com") {
+                    val low=JSONObject().put("codec_type","h264").put("quality_desc","1080p")
+                        .put("vwidth",if(portrait) 720 else 1280).put("vheight",if(portrait) 1280 else 720)
+                        .put("main_url","https://example.com/720")
+                    val high=JSONObject().put("codec_type","h264").put("quality_desc","720p")
+                        .put("video_meta",JSONObject().put("width",if(portrait) 1080 else 1920)
+                            .put("height",if(portrait) 1920 else 1080))
+                        .put("main_url","https://example.com/1080")
+                    JSONObject().put("video_info",JSONObject().put("data",JSONObject().put("video_list",
+                        JSONObject().put("video_0",low).put("video_1",high)))).toString()
+                } else """{"data":{"123":{"video_model":{"fallback_api":"https://example.com/stream"}}}}"""
+            }
+            val result=repo.stream("123",720)
+            assertEquals("https://example.com/720",result.url)
+            assertEquals("720P",result.quality)
+        }
+    }
+
     private fun repository(clock: () -> Long = System::currentTimeMillis, respond: (Request) -> String) = ContentRepository(
         OkHttpClient.Builder().addInterceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)

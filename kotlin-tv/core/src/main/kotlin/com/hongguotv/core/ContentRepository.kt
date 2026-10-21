@@ -214,11 +214,34 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
     }
     fun detail(id: String): Detail {
         require(id.matches(Regex("[0-9]{1,30}")))
-        val o=router("$site/detail?series_id=$id").optJSONObject("detail_page")?.optJSONObject("seriesDetail") ?: throw IOException("剧集详情暂不可用")
-        val raw=o.optJSONArray("vid_list") ?: throw IOException("分集暂不可用")
-        val episodes=(0 until raw.length()).map { raw.getString(it) }
-        if(episodes.isEmpty() || episodes.any { !it.matches(Regex("[0-9]{1,30}")) } || episodes.distinct().size!=episodes.size) throw IOException("分集数据异常")
-        return Detail(card(o).copy(id=id),episodes)
+        try {
+            val o=router("$site/detail?series_id=$id").optJSONObject("detail_page")?.optJSONObject("seriesDetail") ?: throw IOException("剧集详情暂不可用")
+            val raw=o.optJSONArray("vid_list") ?: throw IOException("分集暂不可用")
+            val episodes=(0 until raw.length()).map { raw.getString(it) }
+            if(o.str("series_id").let { it.isNotEmpty() && it!=id } || episodes.isEmpty() || episodes.any { !it.matches(Regex("[0-9]{1,30}")) } || episodes.distinct().size!=episodes.size) throw IOException("分集数据异常")
+            return Detail(card(o).copy(id=id),episodes)
+        } catch(websiteFailure: Exception) {
+            RequestScope.ensureActive()
+            try { return appDetail(id) } catch(fallbackFailure: Exception) {
+                RequestScope.ensureActive()
+                throw IOException("官网和备用详情接口均暂不可用，请稍后重试",fallbackFailure).also { it.addSuppressed(websiteFailure) }
+            }
+        }
+    }
+    private fun appDetail(id: String): Detail {
+        val biz=JSONObject("""{"detail_page_version":0,"disable_digg_stat":false,"image_shrink_datas_str":"W3siaW1hZ2VfdHlwZSI6MywiaW1hZ2Vfd2lkdGgiOjkwMCwic2hyaW5rX3R5cGUiOjN9LHsiaW1hZ2VfdHlwZSI6NCwiaW1hZ2Vfd2lkdGgiOjcyLCJzaHJpbmtfdHlwZSI6NH1d\n","need_all_video_definition":false,"need_mp4_align":false,"screen_width_px":"900","source":7,"use_os_player":false,"use_server_dns":false}""")
+        val payload=JSONObject().put("biz_param",biz).put("dr_scene","preload").put("series_id",id).toString().toByteArray()
+        val signed=signer.sign("https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_detail/preload/v1",VendorConstants.device,payload)
+        val data=JSONObject(text(signed.url,signed))
+        if(data.optInt("code",data.optInt("Code",-1))!=0) throw IOException("备用详情接口未返回可用数据")
+        val video=data.optJSONObject("data")?.optJSONObject(id)?.optJSONObject("video_data") ?: throw IOException("备用接口未返回所选剧集")
+        val series=card(video)
+        if(series.id!=id || series.title.isBlank() || video.str("series_id_str").let { it.isNotEmpty() && it!=id }) throw IOException("备用剧集信息不匹配")
+        val rows=(video.optJSONArray("video_list") ?: throw IOException("备用分集列表为空")).objects().sortedBy { it.optInt("vid_index") }
+        if(rows.isEmpty() || video.optInt("episode_cnt")!=rows.size || rows.withIndex().any { (index,row) -> row.optInt("vid_index")!=index+1 || row.str("series_id")!=id }) throw IOException("备用分集数据不完整")
+        val episodes=rows.map { it.str("vid") }
+        if(episodes.any { !it.matches(Regex("[0-9]{1,30}")) } || episodes.distinct().size!=episodes.size) throw IOException("备用分集数据异常")
+        return Detail(series,episodes)
     }
     fun stream(id: String, maxQuality: Int = 1080): StreamInfo {
         require(id.matches(Regex("[0-9]{1,30}")))
@@ -239,7 +262,14 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         // Keep missing legacy codec labels usable, but never select a known incompatible variant.
         val rows=videoList.keys().asSequence().mapNotNull { k -> videoList.optJSONObject(k)?.let { k to it } }.filter {
             it.second.str("main_url").isNotEmpty() && it.second.str("codec_type").lowercase() !in setOf("bytevc2","bvc2")
-        }.map { (k,o) -> Triple(qualityNumber(o.str("quality_desc").ifEmpty { o.str("height").ifEmpty { o.str("vheight").ifEmpty { o.str("quality").ifEmpty { k } } } }),k,o) }.sortedByDescending { it.first }.toList()
+        }.map { (k,o) ->
+            val dimensions=listOfNotNull(o,o.optJSONObject("video_meta")).flatMap { meta ->
+                listOf(meta.optInt("vwidth") to meta.optInt("vheight"),meta.optInt("width") to meta.optInt("height"))
+            }.firstOrNull { (width,height) -> width>0 && height>0 }
+            val quality=dimensions?.let { (width,height) -> minOf(width,height) }
+                ?: qualityNumber(o.str("quality_desc").ifEmpty { o.str("height").ifEmpty { o.str("vheight").ifEmpty { o.str("quality").ifEmpty { k } } } })
+            Triple(quality,k,o)
+        }.sortedByDescending { it.first }.toList()
         val selected=rows.firstOrNull { it.first<=maxQuality } ?: rows.lastOrNull() ?: throw IOException("没有电视可播放的清晰度，请稍后再试或选择其他剧集")
         val item=selected.third; var url=cleanUrl(item.str("main_url")); val seed=info.str("key_seed")
         if(seed.isNotEmpty()) url=MediaCrypto.decryptUrl(url,decode64(seed))
