@@ -57,6 +57,15 @@ class SearchCatalogTest {
         now=300001
         assertThrows(SearchSessionExpiredException::class.java) { search.page("剧",2,ContentType.SHORT) }
     }
+    @Test fun sourcePagingContinuesPastOneHundredPages() {
+        val target=101
+        val search=SearchCatalog({ _,page,_ ->
+            CatalogPage((1..24).map { Series("${page}_$it","第 $page 页剧集 $it") },page<target)
+        })
+        var found=false
+        for(page in 1..target) found = found || search.page("剧",page,ContentType.SHORT).items.any { it.title.startsWith("第 101 页") }
+        assertTrue(found)
+    }
     @Test fun topicsUseRealTagsAndEveryLoadedSeriesAppearsOnce() {
         val items=(1..60).map { Series("$it","剧 $it",tags=if(it%2==0) "玄幻 · 修仙" else "都市 · 爱情") }
         val shelves=DiscoveryShelves.from(items+items.take(2))

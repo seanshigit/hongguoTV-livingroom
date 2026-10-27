@@ -7,6 +7,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.Closeable
 import java.net.InetSocketAddress
+import java.nio.file.Files
 
 class FasterBrowsingTest {
     private class Resource: Closeable { var closed=false; override fun close() { closed=true } }
@@ -64,13 +65,16 @@ class FasterBrowsingTest {
         }
         server.start()
         val client=OkHttpClient()
+        val cacheDirectory=Files.createTempDirectory("hongguotv-remote-video-cache").toFile()
         try {
-            val remote=RemoteVideo(client,StreamInfo("http://127.0.0.1:${server.address.port}/video",null,"720P")).warm()
+            val cache=PlaybackCache(cacheDirectory,16*1024*1024)
+            val remote=RemoteVideo(client,StreamInfo("http://127.0.0.1:${server.address.port}/video",null,"720P"),cache,"episode:720").warm()
             assertEquals(listOf("bytes=0-262143","bytes=262144-1048575"),ranges.toList())
+            assertArrayEquals(data.copyOfRange(11,700011),remote.read(11,700000)); assertEquals(2,ranges.size)
             assertArrayEquals(data.copyOfRange(11,700011),remote.read(11,700000)); assertEquals(2,ranges.size)
             assertArrayEquals(data.copyOfRange(1000000,1200000),remote.read(1000000,200000))
             assertEquals("bytes=1048576-1199999",ranges.last())
             remote.close(); assertThrows(java.io.IOException::class.java) { remote.read(0,1) }
-        } finally { server.stop(0); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdownNow() }
+        } finally { cacheDirectory.deleteRecursively(); server.stop(0); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdownNow() }
     }
 }

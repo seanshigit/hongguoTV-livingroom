@@ -16,7 +16,7 @@ class SearchCatalog(private val load: (String,Int,ContentType)->CatalogPage, pri
     private val sessions=linkedMapOf<Pair<ContentType,String>,Session>()
 
     @Synchronized fun page(keyword: String,page: Int,type: ContentType): CatalogPage {
-        require(keyword.isNotBlank() && keyword.length<=80 && page in 1..1000)
+        require(keyword.isNotBlank() && keyword.length<=80 && page in 1..MAX_CATALOG_PAGES)
         val key=type to keyword
         sessions.entries.removeAll { clock()-it.value.touched>300_000 }
         val session=sessions[key] ?: if(page==1) Session(clock()).also { sessions[key]=it } else throw SearchSessionExpiredException()
@@ -38,8 +38,8 @@ class SearchCatalog(private val load: (String,Int,ContentType)->CatalogPage, pri
             session.pending+=result.items.filter { session.seen.add(it.id) }
             if(result.notice.isNotBlank()) { session.notice=result.notice; notice=result.notice }
             session.sourcePage++
-            session.more=result.hasMore && session.sourcePage<=100
-            if(result.hasMore && !session.more) notice="已达到接口分页上限，可换更具体的剧名继续查找"
+            session.more=result.hasMore && session.sourcePage<=MAX_CATALOG_PAGES
+            if(result.hasMore && !session.more) notice="已达到公开片库安全分页上限，可换更具体的剧名继续查找"
         }
         RequestScope.ensureActive()
         session.pending.sortBy { relevance(it,keyword) }

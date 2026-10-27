@@ -162,13 +162,23 @@ class Library(context: Context) {
     var frameMode: VideoFrameMode
         get() = state().settings.frame
         set(value) { if (value != frameMode) { state().settings = state().settings.copy(frame = value); put("frameMode", value.name) } }
+    var playbackCacheMb: Long
+        get() = state().settings.playbackCacheMb
+        set(value) {
+            val next = PlaybackCacheSize.normalize(value)
+            if (next != playbackCacheMb) {
+                state().settings = state().settings.copy(playbackCacheMb = next)
+                put("playbackCacheMb", next)
+            }
+        }
     fun snapshot() = state().snapshot()
     fun restore(incoming: BackupData, restoreSettings: Boolean) {
         val merged = LibraryBackup.merge(snapshot(), incoming, restoreSettings)
         index = LibraryIndex(merged, state().updates())
         persist("favorites", "later", "progress", "watched", "hidden", "searches", "favoriteUpdates")
         writes.submit(mapOf("quality" to { merged.settings.quality }, "playbackSpeed" to { merged.settings.speed },
-            "autoNext" to { merged.settings.autoNext }, "contentType" to { merged.settings.type.storedValue }, "frameMode" to { merged.settings.frame.name }))
+            "autoNext" to { merged.settings.autoNext }, "contentType" to { merged.settings.type.storedValue },
+            "frameMode" to { merged.settings.frame.name }, "playbackCacheMb" to { merged.settings.playbackCacheMb }))
         flush()
     }
     /** Requests prompt background commit, without lifecycle-thread disk waits. */
@@ -191,6 +201,7 @@ class Library(context: Context) {
                 null -> edit.remove(key)
                 is String -> edit.putString(key, value)
                 is Int -> edit.putInt(key, value)
+                is Long -> edit.putLong(key, value)
                 is Float -> edit.putFloat(key, value)
                 is Boolean -> edit.putBoolean(key, value)
                 is Set<*> -> edit.putStringSet(key, value.filterIsInstance<String>().toSet())
