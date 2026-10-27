@@ -35,7 +35,7 @@ class MainActivity: Activity() {
     private val accent=TvStyle.accent; private val white=TvStyle.text; private val muted=TvStyle.muted
     private val main=Handler(Looper.getMainLooper())
     private val io=Executors.newFixedThreadPool(3)
-    private val repository=ContentRepository()
+    private val repository=ContentRepository(playbackSession=PlaybackDeviceSession.shared)
     private var searchCatalog=newSearchCatalog()
     private var searchStatus: TextView?=null
     private fun newSearchCatalog()=SearchCatalog({ keyword,page,type ->
@@ -1073,7 +1073,7 @@ class MainActivity: Activity() {
         val ticket=preparedNext.begin(key)
         val playbackTicket=generation
         val http=okhttp3.OkHttpClient.Builder().connectTimeout(8,java.util.concurrent.TimeUnit.SECONDS).readTimeout(15,java.util.concurrent.TimeUnit.SECONDS).callTimeout(20,java.util.concurrent.TimeUnit.SECONDS).build()
-        val source=ContentRepository(http); prefetchHttp=http
+        val source=ContentRepository(http,playbackSession=PlaybackDeviceSession.shared); prefetchHttp=http
         val scope=RequestScope(); prefetchScope=scope
         prefetchJob=prefetchWorker.submit {
             var remote: RemoteVideo?=null

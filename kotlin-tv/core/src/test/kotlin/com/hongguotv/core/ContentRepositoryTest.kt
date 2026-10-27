@@ -17,15 +17,20 @@ class ContentRepositoryTest {
         val error=assertThrows(IOException::class.java) { repo.stream("123") }
         assertTrue(error.message.orEmpty().contains("110001"))
     }
-    @Test fun playbackUsesIndependentVisitorIdentifiersPerRequest() {
+    @Test fun playbackReusesOneRegisteredIdentityAcrossRequests() {
         val visitors=mutableListOf<Pair<String?,String?>>()
-        val repo=repository { request ->
+        var registrations=0
+        val repo=ContentRepository(repositoryHttp { request ->
             visitors+=request.url.queryParameter("iid") to request.url.queryParameter("device_id")
             """{"Code":110001}"""
-        }
+        }, playbackSession=PlaybackDeviceSession {
+            registrations++
+            DeviceRegister.Registered("9007199254740993","9007199254741993")
+        })
         repeat(2) { assertThrows(IOException::class.java) { repo.stream("123") } }
-        assertNotEquals(visitors[0],visitors[1])
-        assertTrue(visitors.all { (iid,device) -> iid?.matches(Regex("[0-9]{16}"))==true && device?.matches(Regex("[0-9]{16}"))==true && iid!=device })
+        assertEquals(1,registrations)
+        assertEquals(visitors[0],visitors[1])
+        assertTrue(visitors.all { (iid,device) -> iid=="9007199254741993" && device=="9007199254740993" })
     }
 
     @Test fun playbackNeverSubstitutesAnotherEpisodeFromTheResponse() {
@@ -159,11 +164,12 @@ class ContentRepositoryTest {
     }
 
     private fun repository(clock: () -> Long = System::currentTimeMillis, respond: (Request) -> String) = ContentRepository(
-        OkHttpClient.Builder().addInterceptor { chain ->
+        repositoryHttp(respond),clock,PlaybackDeviceSession { DeviceRegister.Registered("12345","67890") })
+
+    private fun repositoryHttp(respond: (Request) -> String) = OkHttpClient.Builder().addInterceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(200).message("OK").body(respond(chain.request()).toResponseBody()).build()
-        }.build(),clock
-    )
+        }.build()
 
     private fun rankPayload(page: Int = 1, totalPages: Int = 2) = JSONObject()
         .put("isSuccess",true)

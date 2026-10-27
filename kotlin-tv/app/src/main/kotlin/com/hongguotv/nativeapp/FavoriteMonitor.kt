@@ -19,7 +19,7 @@ class FavoriteMonitor(private val library: Library, source: ContentRepository, p
     private var destroyed = false
     private val http = source.http.newBuilder().callTimeout(12, TimeUnit.SECONDS)
         .build()
-    private val repository = ContentRepository(http)
+    private val repository = ContentRepository(http, playbackSession = com.hongguotv.core.PlaybackDeviceSession.shared)
     var running = false; private set
     var status = "进入收藏可手动检查更新"; private set
     var lastChangedId: String? = null; private set

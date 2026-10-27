@@ -30,7 +30,11 @@ class ProviderPlaybackException(val sourceCode: Int): IOException("片源暂不�
 private class EmptySearchResponseException: IOException("搜索接口未返回内容")
 internal const val MAX_CATALOG_PAGES = 1000
 
-class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectTimeout(15,TimeUnit.SECONDS).readTimeout(30,TimeUnit.SECONDS).callTimeout(45,TimeUnit.SECONDS).build(), private val clock: () -> Long = System::currentTimeMillis) {
+class ContentRepository(
+    val http: OkHttpClient = OkHttpClient.Builder().connectTimeout(15,TimeUnit.SECONDS).readTimeout(30,TimeUnit.SECONDS).callTimeout(45,TimeUnit.SECONDS).build(),
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val playbackSession: PlaybackDeviceSession = PlaybackDeviceSession(),
+) {
     private val signer = Signer()
     private val site = "https://hongguoduanju.com"
     private data class SearchCursor(val searchId: String, val passback: String, val offset: Int?, val updatedAt: Long)
@@ -388,10 +392,11 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
     private fun streamOnce(id: String, maxQuality: Int): StreamInfo {
         require(id.matches(Regex("[0-9]{1,30}")))
         val payload="""{"biz_param":{"detail_page_version":0,"device_level":3,"disable_digg_stat":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$id"]}}""".toByteArray()
+        val identity=playbackSession.profile(http)
         var data: JSONObject?=null; var parseFailure: Throwable?=null
         for(attempt in 0 until 3) {
             RequestScope.ensureActive()
-            val signed=signer.sign("https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/",VendorConstants.device,payload)
+            val signed=playbackRequest(identity,payload)
             val response=text(signed.url,signed)
             if(response.isBlank()) { parseFailure=IOException("播放接口返回为空"); continue }
             try { data=JSONObject(response); break } catch(e: org.json.JSONException) { parseFailure=e }
@@ -401,32 +406,47 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         if(sourceCode!=0) throw ProviderPlaybackException(sourceCode)
         val map=result.optJSONObject("data") ?: throw IOException("播放信息为空")
         val entry=map.optJSONObject(id) ?: throw IOException("片源未返回所选分集，请稍后重试")
-        val model=entry.optJSONObject("video_model") ?: JSONObject(entry.str("video_model"))
+        val model=when(val rawModel=entry.opt("video_model")) {
+            is JSONObject -> rawModel
+            is String -> runCatching { JSONObject(rawModel) }.getOrElse { throw IOException("播放模型格式异常",it) }
+            else -> throw IOException("片源未返回所选分集，请稍后重试")
+        }
+        val inlineRows=model.optJSONArray("video_list")?.objects().orEmpty()
+        val inline=inlineRows.isNotEmpty()
         val raw=model.opt("fallback_api")
-        val fallbacks=when(raw) {
-            is JSONObject -> listOf(raw.str("fallback_api"))
-            is JSONArray -> (0 until raw.length()).mapNotNull { raw.optString(it).takeIf { value -> value.isNotBlank() } }
-            else -> listOf(runCatching { JSONObject(raw.toString()).str("fallback_api") }.getOrDefault(raw.toString()))
-        }.filter { it.startsWith("https://") }
-        var info: JSONObject?=null; var fallbackFailure: Throwable?=null
-        for(fallback in fallbacks) {
-            try {
-                info=JSONObject(text(fallback)).optJSONObject("video_info")?.optJSONObject("data")
-                if(info!=null) break
-            } catch(e: Exception) { fallbackFailure=e }
+        var info: JSONObject?=if(inline) {
+            JSONObject().put("key_seed",model.str("key_seed")).put("video_list",JSONObject().apply {
+                inlineRows.forEachIndexed { index,row -> put("video_$index",row) }
+            })
+        } else null
+        var fallbackFailure: Throwable?=null
+        if(info==null) {
+            val fallbacks=when(raw) {
+                is JSONObject -> listOf(raw.str("fallback_api"))
+                is JSONArray -> (0 until raw.length()).mapNotNull { raw.optString(it).takeIf { value -> value.isNotBlank() } }
+                else -> listOf(raw?.let { runCatching { JSONObject(it.toString()).str("fallback_api") }.getOrDefault(it.toString()) }.orEmpty())
+            }.filter { it.startsWith("https://") }
+            for(fallback in fallbacks) {
+                try {
+                    info=JSONObject(text(fallback)).optJSONObject("video_info")?.optJSONObject("data")
+                    if(info!=null) break
+                } catch(e: Exception) { fallbackFailure=e }
+            }
         }
         val videoInfo=info ?: throw IOException("没有播放资源",fallbackFailure)
         val videoList=videoInfo.optJSONObject("video_list") ?: throw IOException("没有可用清晰度")
         // ByteVC2 resources can expose playable audio but no video track in Android's MP4 extractor.
         // Keep missing legacy codec labels usable, but never select a known incompatible variant.
         val rows=videoList.keys().asSequence().mapNotNull { k -> videoList.optJSONObject(k)?.let { k to it } }.filter {
-            it.second.str("main_url").isNotEmpty() && it.second.str("codec_type").lowercase() !in setOf("bytevc2","bvc2")
+            val codec=it.second.str("codec_type").ifEmpty { it.second.optJSONObject("video_meta")?.str("codec_type").orEmpty() }
+            it.second.str("main_url").isNotEmpty() && codec.lowercase() !in setOf("bytevc2","bvc2")
         }.map { (k,o) ->
             val dimensions=listOfNotNull(o,o.optJSONObject("video_meta")).flatMap { meta ->
                 listOf(meta.optInt("vwidth") to meta.optInt("vheight"),meta.optInt("width") to meta.optInt("height"))
             }.firstOrNull { (width,height) -> width>0 && height>0 }
+            val meta=o.optJSONObject("video_meta")
             val quality=dimensions?.let { (width,height) -> minOf(width,height) }
-                ?: qualityNumber(o.str("quality_desc").ifEmpty { o.str("height").ifEmpty { o.str("vheight").ifEmpty { o.str("quality").ifEmpty { k } } } })
+                ?: qualityNumber(o.str("quality_desc").ifEmpty { o.str("height").ifEmpty { o.str("vheight").ifEmpty { o.str("quality").ifEmpty { meta?.str("definition").orEmpty().ifEmpty { k } } } } })
             Triple(quality,k,o)
         }.sortedByDescending { it.first }.toList()
         data class Variant(val resolution: Int,val candidate: StreamCandidate)
@@ -450,7 +470,10 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         fun variants(row: Triple<Int,String,JSONObject>): List<Variant> {
             val item=row.third; val seed=videoInfo.str("key_seed")
             val quality=if(row.first>0) "${row.first}P"+(if(row.first>maxQuality) "（兼容资源）" else "") else "自动"
-            val key=item.str("spade_a").takeIf { it.isNotEmpty() }?.let(MediaCrypto::deriveKey)
+            val encryption=item.optJSONObject("encrypt_info")
+            val spade=item.str("spade_a").ifEmpty { encryption?.str("spade_a").orEmpty() }
+            if(inline && encryption!=null && encryption.opt("encrypt") !in listOf(false,0,"0","false") && spade.isEmpty()) return emptyList()
+            val key=spade.takeIf { it.isNotEmpty() }?.let(MediaCrypto::deriveKey)
             return candidateUrls(item).mapNotNull { raw ->
                 runCatching {
                     var url=raw
@@ -466,6 +489,16 @@ class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().connectT
         val selected=ordered.firstOrNull() ?: throw IOException("没有电视可播放的清晰度，请稍后再试或选择其他剧集")
         return StreamInfo(selected.candidate.url,selected.candidate.key,selected.candidate.quality,
             ordered.drop(1).map { it.candidate })
+    }
+    private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray): Signer.Request {
+        val url="https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/?"+
+            Signer.encode(identity.values + ("_rticket" to clock().toString()))
+        val headers=linkedMapOf(
+            "User-Agent" to "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)",
+            "Accept" to "application/json; charset=utf-8,application/x-protobuf",
+        )
+        if(identity.cookie.isNotBlank()) headers["Cookie"]=identity.cookie
+        return Signer.Request(url,headers,payload)
     }
     companion object {
         fun extractRouter(html: String): JSONObject {
