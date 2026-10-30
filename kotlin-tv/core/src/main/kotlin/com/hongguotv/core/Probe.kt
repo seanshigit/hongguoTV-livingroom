@@ -45,7 +45,7 @@ fun main(args: Array<String>) {
                 check(home.items.isNotEmpty() && home.items.distinctBy { it.id }.size==home.items.size)
                 println("type=${type.label}; home=${home.items.size}; sourcePages=${home.loadedPages}; shelves=${DiscoveryShelves.from(home.items).map { it.title to it.items.size }}; notice=${home.notice}")
                 val keyword=if(type==ContentType.COMIC) "修仙" else "总裁"
-                val results=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) })
+                val results=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) },supplement={ keyword,page,kind -> repository.searchSupplement(keyword,page,kind) })
                 val seen=mutableSetOf<String>()
                 for(page in 1..1000) {
                     val result=results.page(keyword,page,type)
@@ -55,7 +55,7 @@ fun main(args: Array<String>) {
                     if(!result.hasMore) break
                 }
                 val exact=home.items.first().title.take(80)
-                val matches=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) }).page(exact,1,type)
+                val matches=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) },supplement={ keyword,page,kind -> repository.searchSupplement(keyword,page,kind) }).page(exact,1,type)
                 println("exactQuery=$exact; found=${matches.foundCount}; first=${matches.items.firstOrNull()?.title}; exactFound=${matches.items.any { it.title==exact }}")
             }
         } finally {

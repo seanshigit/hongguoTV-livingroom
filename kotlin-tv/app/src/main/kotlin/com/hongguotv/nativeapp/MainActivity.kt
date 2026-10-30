@@ -43,7 +43,7 @@ class MainActivity: Activity() {
         repository.search(keyword,page,type) { count -> main.post {
             if(generation==ticket && screen=="catalog" && tab==1) searchStatus?.text="正在查找“$keyword” · 已检索官网片库 $count 部"
         } }
-    })
+    },supplement={ keyword,page,type -> repository.searchSupplement(keyword,page,type) })
     private val networkCleanup=Executors.newSingleThreadExecutor()
     private val prefetchWorker=Executors.newSingleThreadExecutor()
     private val cachePrefetchWorker=Executors.newSingleThreadExecutor()

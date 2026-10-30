@@ -12,6 +12,27 @@ import org.junit.Test
 import java.io.IOException
 
 class ContentRepositoryTest {
+    @Test fun unavailableSupplementDoesNotStartAFullCatalogScan() {
+        var categoryRequests=0
+        val repo=repository { request ->
+            when {
+                request.url.host.contains("fqnovel") -> ""
+                request.url.encodedPath=="/api/search/result/" && request.url.queryParameter("query")=="聚宝仙盆第十五季" ->
+                    JSONObject().put("searchList",JSONArray().put(JSONObject().put("series_id","14")
+                        .put("series_title","聚宝仙盆之杂灵根才是真BOSS第十四季").put("genre","205")))
+                        .put("totalPages",1).put("hasMore",false).toString()
+                request.url.encodedPath=="/api/search/result/" -> ""
+                request.url.encodedPath.startsWith("/search/") -> websiteResults()
+                else -> {
+                    categoryRequests++
+                    """<script>_ROUTER_DATA={"loaderData":{"category_${'$'}":{"recommendList":[],"pagination":{"pageNum":1,"totalPages":1}}}};</script>"""
+                }
+            }
+        }
+        val search=SearchCatalog({ keyword,page,type -> repo.search(keyword,page,type) },supplement={ keyword,page,type -> repo.searchSupplement(keyword,page,type) })
+        assertEquals("14",search.page("聚宝仙盆第十五季",1,ContentType.COMIC).items.single().id)
+        assertEquals(0,categoryRequests)
+    }
     @Test fun upstreamPlaybackErrorKeepsItsCodeForRecoveryAndDiagnostics() {
         val repo=repository { """{"Code":110001,"Message":"未知异常"}""" }
         val error=assertThrows(IOException::class.java) { repo.stream("123") }

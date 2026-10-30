@@ -54,12 +54,13 @@ class ContentRepository(
     }
     private val titleCatalogs=mutableMapOf<ContentType,TitleCatalog>()
     private val categorySlugs=mutableMapOf<ContentType,List<String>>()
-    private fun text(url: String, signed: Signer.Request? = null): String {
+    private val supplementHttp by lazy { http.newBuilder().connectTimeout(3,TimeUnit.SECONDS).readTimeout(3,TimeUnit.SECONDS).callTimeout(4,TimeUnit.SECONDS).build() }
+    private fun text(url: String, signed: Signer.Request? = null, quick: Boolean = false): String {
         val request = Request.Builder().url(url).header("User-Agent",VendorConstants.VIDEO_UA).header("Accept-Language","zh-CN,zh;q=0.9")
         signed?.headers?.forEach { (k,v) -> request.header(k,v) }
         signed?.body?.let { request.post(it.toRequestBody("application/json; charset=utf-8".toMediaType())) }
         val built=request.build()
-        return NetworkRetry.execute(built) { RequestScope.execute(http.newCall(built)) { response ->
+        val action={ RequestScope.execute((if(quick) supplementHttp else http).newCall(built)) { response ->
             if (!response.isSuccessful) throw HttpStatusException(response.code,response.header("Retry-After"),"内容请求失败（HTTP ${response.code}）")
             val body = response.body ?: throw IOException("内容响应为空")
             if (body.contentLength() > 16*1024*1024) throw IOException("内容响应过大")
@@ -68,6 +69,7 @@ class ContentRepository(
             if(bytes.size > 16*1024*1024) throw IOException("内容响应过大")
             String(bytes,Charsets.UTF_8)
         } }
+        return if(quick) action() else NetworkRetry.execute(built,action)
     }
     private fun router(url: String) = extractRouter(text(url)).getJSONObject("loaderData")
     private fun card(item: JSONObject): Series {
@@ -211,11 +213,15 @@ class ContentRepository(
         val totalPages=section.optJSONObject("pagination")?.optInt("totalPages",100) ?: 100
         return CatalogPage(items,items.isNotEmpty() && page<minOf(totalPages,100))
     }
-    private fun publicSearch(keyword: String,page: Int,type: ContentType): CatalogPage {
+    fun searchSupplement(keyword: String,page: Int,type: ContentType): CatalogPage {
+        require(keyword.isNotBlank() && keyword.length<=80 && page in 1..MAX_CATALOG_PAGES)
+        return publicSearch(keyword,page,type,quick=true)
+    }
+    private fun publicSearch(keyword: String,page: Int,type: ContentType,quick: Boolean=false): CatalogPage {
         require(page in 1..MAX_CATALOG_PAGES)
         // The public endpoint intermittently serves a cached 502 for the bare page URL;
         // keep the documented web client marker in the cache key.
-        val response=text("$site/api/search/result/?query=${Signer.encode(keyword)}&page=$page&client=web")
+        val response=text("$site/api/search/result/?query=${Signer.encode(keyword)}&page=$page&client=web",quick=quick)
         return runCatching {
             val data=JSONObject(response)
             val rows=data.optJSONArray("searchList") ?: throw IOException("官网关键词搜索暂不可用")

@@ -24,6 +24,72 @@ class SearchCatalogTest {
         assertEquals(listOf("21","22","23"),result.items.take(3).map { it.id })
         assertEquals(23,result.items.size); assertEquals(23,result.foundCount); assertFalse(result.hasMore)
     }
+    @Test fun abbreviatedSeasonQueryFindsNewSeasonDespiteOneMistypedCharacter() {
+        for (query in listOf("聚宝先盆第十五季", "聚宝仙盆第15季")) {
+            val search = SearchCatalog({ keyword, _, type ->
+                assertEquals(ContentType.COMIC, type)
+                when (keyword) {
+                    query -> CatalogPage(listOf(
+                        Series("14", "聚宝仙盆之杂灵根才是真BOSS第十四季"),
+                        Series("other", "其他故事第十五季")
+                    ), false)
+                    "聚宝仙盆之杂灵根才是真BOSS第十五季" -> CatalogPage(listOf(
+                        Series("15", "聚宝仙盆之杂灵根才是真BOSS第十五季"),
+                        Series("other", "其他故事第十五季")
+                    ), false)
+                    else -> CatalogPage(emptyList(), false)
+                }
+            })
+            val result = search.page(query, 1, ContentType.COMIC)
+            assertEquals("15", result.items.first().id)
+            assertEquals(1, result.items.count { it.id == "15" })
+        }
+    }
+    @Test fun broadSeriesSearchFindsTheNextSeasonMissingFromTheInitialSourcePage() {
+        val search=SearchCatalog({ keyword,_,_ ->
+            when(keyword) {
+                "聚宝仙盆" -> CatalogPage(listOf(
+                    Series("14","聚宝仙盆之杂灵根才是真BOSS第十四季"),
+                    Series("12","聚宝仙盆之杂灵根才是真BOSS第十二季")
+                ),false)
+                "聚宝仙盆之杂灵根才是真BOSS第十五季" -> CatalogPage(listOf(
+                    Series("15","聚宝仙盆之杂灵根才是真BOSS第十五季")
+                ),false)
+                else -> CatalogPage(emptyList(),false)
+            }
+        })
+        val result=search.page("聚宝仙盆",1,ContentType.COMIC)
+        assertTrue(result.items.any { it.id=="15" })
+        assertEquals(3,result.items.map { it.id }.distinct().size)
+    }
+    @Test fun appResultsAreSupplementedByIndependentWebsiteMatches() {
+        val search=SearchCatalog(
+            { _,_,_ -> CatalogPage(listOf(Series("1","修仙第一部")),false) },
+            supplement={ _,_,_ -> CatalogPage(listOf(Series("1","修仙第一部"),Series("2","修仙第二部")),false) }
+        )
+        val result=search.page("修仙",1,ContentType.COMIC)
+        assertEquals(listOf("1","2"),result.items.map { it.id })
+    }
+    @Test fun independentWebsitePagesRemainReachableAfterAppResultsEnd() {
+        val websitePages=mutableListOf<Int>()
+        val search=SearchCatalog(
+            { _,_,_ -> CatalogPage((1..24).map { Series("$it","修仙剧 $it") },false) },
+            supplement={ _,page,type ->
+                assertEquals(ContentType.COMIC,type)
+                websitePages+=page
+                val ids=when(page) { 1 -> listOf(20)+(25..48).toList(); 2 -> (49..72).toList(); 3 -> (73..80).toList(); else -> error("unexpected page $page") }
+                CatalogPage(ids.map { Series("$it","修仙剧 $it") },page<3)
+            }
+        )
+        val first=search.page("修仙",1,ContentType.COMIC)
+        val all=first.items.toMutableList()
+        var page=1; var more=first.hasMore
+        while(more && page<10) { val next=search.page("修仙",++page,ContentType.COMIC); all+=next.items; more=next.hasMore }
+        assertFalse(more)
+        assertEquals(80,all.size); assertEquals(80,all.map { it.id }.distinct().size)
+        assertEquals(listOf(1,2,3),websitePages)
+        assertEquals(first.items,search.page("修仙",1,ContentType.COMIC).items)
+    }
     @Test fun failedNextPageCanBeRetriedWithoutLosingTheEarlierPage() {
         var offline=true
         val search=SearchCatalog({ _,page,_ ->

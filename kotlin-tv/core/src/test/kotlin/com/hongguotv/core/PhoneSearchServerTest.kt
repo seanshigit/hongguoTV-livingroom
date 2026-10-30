@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class PhoneSearchServerTest {
+    private fun formToken(page: String) = Regex("""name="form_token" value="([0-9a-f]{32})"""").find(page)?.groupValues?.get(1)
     private fun request(server: PhoneSearchServer,method: String="GET",path: String?=null,body: String="",headers: String="",host: String?=null): String {
         val uri=URI(server.url)
         return Socket("127.0.0.1",uri.port).use { socket ->
@@ -24,7 +25,7 @@ class PhoneSearchServerTest {
             val page=request(server)
             assertTrue(page.startsWith("HTTP/1.1 200")); assertTrue(page.contains("Cache-Control: no-store")); assertTrue(page.contains("form-action 'self'"))
             val value="测试 <script>alert(1)</script>"
-            val reply=request(server,"POST",URI(server.url).path+"/submit","query="+URLEncoder.encode(value,"UTF-8"))
+            val reply=request(server,"POST",URI(server.url).path+"/submit","query="+URLEncoder.encode(value,"UTF-8")+"&form_token="+formToken(page))
             assertTrue(reply.startsWith("HTTP/1.1 200")); assertFalse(reply.contains(value))
             assertTrue(received.await(2,TimeUnit.SECONDS)); assertEquals(value,query)
             assertTrue(runCatching { request(server) }.isFailure)
@@ -39,10 +40,27 @@ class PhoneSearchServerTest {
             assertFalse(submitted)
         }
     }
+    @Test fun `wechat origin mismatch accepts only a form token obtained from the phone page`() {
+        val received=CountDownLatch(1); var query=""
+        PhoneSearchServer("127.0.0.1",{ query=it; received.countDown() }).use { server ->
+            val page=request(server)
+            val formToken=formToken(page)
+            assertNotNull("The form needs its own unguessable submission token",formToken)
+            val path=URI(server.url).path+"/submit"
+            val origin="Origin: null\r\n"
+            val bad=request(server,"POST",path,"query=test&form_token="+"0".repeat(32),origin)
+            assertTrue(bad,bad.startsWith("HTTP/1.1 403"))
+            val body="query="+URLEncoder.encode("聚宝仙盆第十五季","UTF-8")+"&form_token="+formToken
+            val reply=request(server,"POST",path,body,origin)
+            assertTrue(reply,reply.startsWith("HTTP/1.1 200"))
+            assertTrue(received.await(2,TimeUnit.SECONDS)); assertEquals("聚宝仙盆第十五季",query)
+        }
+    }
     @Test fun `invalid and oversized input does not consume the session`() {
         PhoneSearchServer("127.0.0.1",{}).use { server ->
+            val token=formToken(request(server))
             for(body in listOf("query=","query="+"x".repeat(81),"query=a&query=b","query=hello%0Aworld","query=%zz")) {
-                val response=request(server,"POST",URI(server.url).path+"/submit",body)
+                val response=request(server,"POST",URI(server.url).path+"/submit",body+"&form_token="+token)
                 assertTrue(response,response.startsWith("HTTP/1.1 400"))
             }
             assertTrue(request(server,"POST",URI(server.url).path+"/submit","query="+"x".repeat(4096)).startsWith("HTTP/1.1 413"))
