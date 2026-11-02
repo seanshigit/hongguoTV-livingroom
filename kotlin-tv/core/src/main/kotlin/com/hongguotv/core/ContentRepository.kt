@@ -398,13 +398,18 @@ class ContentRepository(
     private fun streamOnce(id: String, maxQuality: Int): StreamInfo {
         require(id.matches(Regex("[0-9]{1,30}")))
         val payload="""{"biz_param":{"detail_page_version":0,"device_level":3,"disable_digg_stat":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$id"]}}""".toByteArray()
-        val identity=playbackSession.profile(http)
-        var data: JSONObject?=null; var parseFailure: Throwable?=null
+        var identity=playbackSession.profile(http)
+        var data: JSONObject?=null; var parseFailure: Throwable?=null; var emptyResponses=0
         for(attempt in 0 until 3) {
             RequestScope.ensureActive()
-            val signed=playbackRequest(identity,payload)
+            val host=if(attempt==1) "api5-normal-hl.fqnovel.com" else "api5-normal-sinfonlineb.fqnovel.com"
+            val signed=playbackRequest(identity,payload,host)
             val response=text(signed.url,signed)
-            if(response.isBlank()) { parseFailure=IOException("播放接口返回为空"); continue }
+            if(response.isBlank()) {
+                parseFailure=IOException("播放接口返回为空")
+                if(++emptyResponses==2) identity=playbackSession.refresh(http,identity)
+                continue
+            }
             try { data=JSONObject(response); break } catch(e: org.json.JSONException) { parseFailure=e }
         }
         val result=data ?: throw IOException("播放接口返回了无法读取的数据，请稍后重试",parseFailure)
@@ -496,15 +501,14 @@ class ContentRepository(
         return StreamInfo(selected.candidate.url,selected.candidate.key,selected.candidate.quality,
             ordered.drop(1).map { it.candidate })
     }
-    private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray): Signer.Request {
-        val url="https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/?"+
-            Signer.encode(identity.values + ("_rticket" to clock().toString()))
-        val headers=linkedMapOf(
-            "User-Agent" to "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)",
-            "Accept" to "application/json; charset=utf-8,application/x-protobuf",
-        )
+    private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray, host: String): Signer.Request {
+        val request=signer.sign("https://$host/novel/player/multi_video_model/v1/",identity.values,payload)
+        val headers=request.headers.toMutableMap()
+        headers["User-Agent"]="com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)"
+        headers["x-tt-store-region"]="cn"
+        headers["x-tt-store-region-src"]="did"
         if(identity.cookie.isNotBlank()) headers["Cookie"]=identity.cookie
-        return Signer.Request(url,headers,payload)
+        return request.copy(headers=headers)
     }
     companion object {
         fun extractRouter(html: String): JSONObject {

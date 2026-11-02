@@ -152,7 +152,7 @@ internal class Signer(private val clock: () -> Long = System::currentTimeMillis,
     }
     fun sign(base: String, values: Map<String,String>, body: ByteArray? = null): Request {
         val now = clock(); val ts = (now / 1000).toInt()
-        val device = values + mapOf("iid" to visitorId(), "device_id" to visitorId())
+        val device = values + mapOf("iid" to (values["iid"] ?: visitorId()), "device_id" to (values["device_id"] ?: visitorId()))
         var ticket = now; var query: String
         for (offset in 0..127) {
             ticket = now + offset; query = encode(device + mapOf("ts" to ts.toString(), "_rticket" to ticket.toString()))

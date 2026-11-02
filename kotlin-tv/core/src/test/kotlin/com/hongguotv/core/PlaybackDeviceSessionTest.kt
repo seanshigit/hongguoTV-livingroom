@@ -137,6 +137,68 @@ class PlaybackDeviceSessionTest {
     }
 
     @Test
+    fun failedRenewalKeepsThePreviouslyRegisteredIdentity() {
+        var calls = 0
+        val session = PlaybackDeviceSession {
+            if (++calls == 1) DeviceRegister.Registered("333", "444") else throw IOException("registration failed")
+        }
+        val http = OkHttpClient()
+        val original = session.profile(http)
+        assertSame(original, session.refresh(http, original))
+        assertSame(original, session.profile(http))
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun cancelledRenewalKeepsThePreviousIdentityAndStopsTheRequest() {
+        var calls = 0
+        val scope = RequestScope()
+        val session = PlaybackDeviceSession {
+            if (++calls == 1) DeviceRegister.Registered("333", "444")
+            else { scope.cancel(); throw IOException("registration cancelled") }
+        }
+        val http = OkHttpClient()
+        val original = session.profile(http)
+        assertThrows(IOException::class.java) { scope.run { session.refresh(http, original) } }
+        assertSame(original, session.profile(http))
+    }
+
+    @Test
+    fun renewalsCanRecoverWithinAMinuteButRemainBounded() {
+        var time = 0L
+        var calls = 0
+        val session = PlaybackDeviceSession(clockNanos = { time }) {
+            calls++
+            DeviceRegister.Registered((100 + calls).toString(), (200 + calls).toString())
+        }
+        val http = OkHttpClient()
+        val first = session.refresh(http, session.profile(http))
+        time = TimeUnit.SECONDS.toNanos(4)
+        assertSame(first, session.refresh(http, first))
+        time = TimeUnit.SECONDS.toNanos(5)
+        val second = session.refresh(http, first)
+        assertNotSame(first, second)
+        time = TimeUnit.SECONDS.toNanos(10)
+        val third = session.refresh(http, second)
+        assertNotSame(second, third)
+        time = TimeUnit.SECONDS.toNanos(15)
+        val fourth = session.refresh(http, third)
+        assertNotSame(third, fourth)
+        time = TimeUnit.SECONDS.toNanos(20)
+        val fifth = session.refresh(http, fourth)
+        assertNotSame(fourth, fifth)
+        time = TimeUnit.SECONDS.toNanos(25)
+        val sixth = session.refresh(http, fifth)
+        assertNotSame(fifth, sixth)
+        time = TimeUnit.SECONDS.toNanos(30)
+        assertSame(sixth, session.refresh(http, sixth))
+        assertEquals(7, calls)
+        time = TimeUnit.SECONDS.toNanos(60)
+        assertNotSame(sixth, session.refresh(http, sixth))
+        assertEquals(8, calls)
+    }
+
+    @Test
     fun cancelledScopeDoesNotSendOrCacheRegistration() {
         var registrations = 0
         val http =

@@ -13,8 +13,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class PlaybackDeviceRegistrationException(cause: Throwable? = null) :
     IOException("播放设备注册失败，请稍后重试", cause)
 
-/** Anonymous playback identity. Register once, then keep the same identity across repositories. */
+/** Anonymous playback identity shared across repositories, with bounded renewal on empty responses. */
 class PlaybackDeviceSession(
+    private val clockNanos: () -> Long = System::nanoTime,
     private val register: (OkHttpClient) -> DeviceRegister.Registered? = { http ->
         val body = DeviceRegister.payload(VendorConstants.device)
         val request = Request.Builder().url(DeviceRegister.url())
@@ -41,6 +42,25 @@ class PlaybackDeviceSession(
 
     private val cdid = UUID.randomUUID().toString()
     private var ready: Profile? = null
+    private val refreshNanos = java.util.ArrayDeque<Long>()
+
+    @Synchronized
+    internal fun refresh(http: OkHttpClient, rejected: Profile): Profile {
+        val current = profile(http)
+        if (current !== rejected) return current
+        val now = clockNanos()
+        while (refreshNanos.isNotEmpty() && now - refreshNanos.first >= java.util.concurrent.TimeUnit.MINUTES.toNanos(1)) refreshNanos.removeFirst()
+        if (refreshNanos.size >= 6 || refreshNanos.peekLast()?.let { now - it < java.util.concurrent.TimeUnit.SECONDS.toNanos(5) } == true) return current
+        refreshNanos.addLast(now)
+        ready = null
+        return try {
+            profile(http)
+        } catch (error: IOException) {
+            ready = current
+            RequestScope.ensureActive()
+            current
+        }
+    }
 
     @Synchronized
     internal fun profile(http: OkHttpClient): Profile {
