@@ -4,6 +4,7 @@ package com.hongguotv.nativeapp
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -19,6 +20,8 @@ import com.hongguotv.core.EpisodeTarget
 import com.hongguotv.core.PhoneSearchServer
 import com.hongguotv.core.LibraryTransferServer
 import com.hongguotv.core.BackupData
+import com.hongguotv.core.QrChallenge
+import com.hongguotv.core.QrLoginResult
 import java.net.Inet4Address
 import java.util.concurrent.Executors
 
@@ -27,19 +30,103 @@ class TvTools(private val activity: Activity) {
     private val main=Handler(Looper.getMainLooper())
     private val worker=Executors.newSingleThreadExecutor()
     private var dialog: AlertDialog?=null
+    private var dialogCleanup: (() -> Unit)?=null
+    private var accountRefresh: (() -> Unit)?=null
     val showing: Boolean get()=dialog?.isShowing==true
     private var phone: java.io.Closeable?=null
     private fun dp(value: Int)=(value*activity.resources.displayMetrics.density).toInt()
     private fun label(value: String,size: Float=17f)=TextView(activity).apply { text=value; textSize=size; setTextColor(Color.WHITE); setPadding(dp(8),dp(4),dp(8),dp(4)) }
     private fun column()=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(4),dp(16),dp(8)) }
-    private fun open(next: AlertDialog,anchor: View?) {
-        dialog?.dismiss(); dialog=next
-        next.setOnDismissListener { if(dialog===next) { phone?.close(); phone=null; dialog=null }; if(anchor?.isAttachedToWindow==true) anchor.requestFocus() }
+    private fun open(next: AlertDialog,anchor: View?,onClose: ()->Unit={}) {
+        dialog?.let { previous ->
+            dialog=null
+            phone?.close(); phone=null
+            val cleanup=dialogCleanup; dialogCleanup=null
+            cleanup?.invoke(); previous.dismiss()
+        }
+        dialog=next; dialogCleanup=onClose
+        next.setOnDismissListener {
+            if(dialog===next) {
+                phone?.close(); phone=null; dialog=null
+                val cleanup=dialogCleanup; dialogCleanup=null; cleanup?.invoke()
+                if(anchor?.isAttachedToWindow==true) anchor.requestFocus()
+            }
+        }
         next.show()
     }
     fun close() { dialog?.dismiss(); phone?.close(); phone=null }
     fun destroy() { close(); worker.shutdownNow() }
     fun info(title: String,message: String,anchor: View?) = open(AlertDialog.Builder(activity).setTitle(title).setMessage(message).setPositiveButton("知道了",null).create(),anchor)
+    fun refreshAccount() { accountRefresh?.invoke() }
+
+    fun account(manager: OfficialAccountManager, anchor: View?) {
+        val current=manager.status()
+        val content=column()
+        if(current.signedIn) {
+            content.addView(label("已登录：${current.name}",18f))
+            val status=label("",15f); content.addView(status)
+            fun refresh() {
+                val state=manager.status()
+                status.text=state.message + if(state.pending>0) " · 待同步 ${state.pending} 条" else ""
+            }
+            val actions=LinearLayout(activity)
+            fun action(title: String,run: ()->Unit) {
+                actions.addView(Button(activity).apply { text=title; setOnClickListener { run() } },LinearLayout.LayoutParams(0,-2,1f))
+            }
+            action("立即同步") { manager.requestSync() }
+            action("合并本机记录") {
+                confirm("合并登录前的本机记录","较新的本机观看进度会合并到当前红果账号，并在同步时上传。",anchor) {
+                    val count=runCatching { manager.importGuest() }.getOrNull()
+                    Toast.makeText(activity,if(count==null) "记录无法合并，请稍后重试" else "已合并 $count 条本机记录",Toast.LENGTH_LONG).show()
+                }
+            }
+            action("退出登录") {
+                confirm("退出红果账号","退出后显示本机记录；该账号的待同步进度保留在本机。",anchor) {
+                    manager.logout { ok -> Toast.makeText(activity,if(ok) "已退出红果账号" else "退出未完成，请重试",Toast.LENGTH_LONG).show() }
+                }
+            }
+            content.addView(actions)
+            val next=AlertDialog.Builder(activity).setTitle("红果账号").setView(content).setNegativeButton("关闭",null).create()
+            open(next,anchor) { accountRefresh=null }
+            accountRefresh=::refresh; refresh()
+            actions.getChildAt(0).requestFocus()
+            return
+        }
+        content.addView(label("请打开手机红果短剧 App，使用扫一扫并在手机上确认登录。",16f))
+        val image=ImageView(activity).apply { contentDescription="红果账号登录二维码"; adjustViewBounds=true }
+        content.addView(image,LinearLayout.LayoutParams(dp(200),dp(200)).apply { gravity=Gravity.CENTER_HORIZONTAL })
+        val status=label("正在获取二维码…",15f); content.addView(status)
+        val next=AlertDialog.Builder(activity).setTitle("扫码登录红果账号").setView(content)
+            .setNegativeButton("关闭",null).setPositiveButton("刷新二维码",null).create()
+        open(next,anchor) { manager.cancelQr(); accountRefresh=null }
+        fun start() {
+            image.setImageDrawable(null); status.text="正在获取二维码…"
+            manager.startQr(object: OfficialAccountManager.QrEvents {
+                override fun challenge(value: QrChallenge) {
+                    val bitmap=BitmapFactory.decodeByteArray(value.png,0,value.png.size)
+                    if(bitmap==null) status.text="二维码图片无效，请刷新" else {
+                        image.setImageBitmap(bitmap); status.text="请用红果 App 扫码，并在手机上确认"
+                    }
+                }
+                override fun state(value: QrLoginResult) {
+                    status.text=when(value) {
+                        QrLoginResult.WAITING -> "请用红果 App 扫码，并在手机上确认"
+                        QrLoginResult.SCANNED -> "已扫码，请在手机上确认登录"
+                        QrLoginResult.EXPIRED -> "二维码已过期，请刷新"
+                        QrLoginResult.CANCELLED -> "手机端已取消，请刷新"
+                        QrLoginResult.SIGNED_IN -> "登录成功"
+                    }
+                }
+                override fun failed(message: String) { status.text=message }
+                override fun signedIn(name: String) {
+                    if(dialog===next) { next.dismiss(); account(manager,anchor) }
+                }
+            })
+        }
+        next.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { start() }
+        next.getButton(AlertDialog.BUTTON_NEGATIVE).requestFocus()
+        start()
+    }
     fun confirm(title: String,message: String,anchor: View?,action: ()->Unit) {
         val next=AlertDialog.Builder(activity).setTitle(title).setMessage(message).setNegativeButton("取消",null).setPositiveButton("确认") { _,_-> action() }.create()
         open(next,anchor); next.getButton(AlertDialog.BUTTON_NEGATIVE).requestFocus()

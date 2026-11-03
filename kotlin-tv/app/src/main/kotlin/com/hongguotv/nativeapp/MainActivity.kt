@@ -93,6 +93,10 @@ class MainActivity: Activity() {
     private val activityStarted=launchStarted
     private var homeContentLogged=false
     private lateinit var library: Library
+    private lateinit var account: OfficialAccountManager
+    private var accountRestoreStarted=false
+    private var accountReady=false
+    private var accountButton: TextView?=null
     private lateinit var playbackCache: PlaybackCache
     private lateinit var tvTools: TvTools
     private lateinit var updater: AppUpdater
@@ -217,6 +221,10 @@ class MainActivity: Activity() {
         super.onCreate(state)
         window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         library=Library(this); playbackCache=PlaybackCache(File(cacheDir,"playback-v1")); artwork=ArtworkLoader(this); tvTools=TvTools(this); root=FrameLayout(this).apply { setBackgroundColor(bg) }; setContentView(root)
+        account=OfficialAccountManager(this,library,{
+            tvTools.refreshAccount()
+            accountButton?.text=accountLabel()
+        },::refreshAccountHistory)
         updater=AppUpdater(this) { foreground && library.isLoaded && screen=="catalog" && !tvTools.showing }
         connectivity=getSystemService(ConnectivityManager::class.java)
         runCatching { connectivity.registerDefaultNetworkCallback(networkCallback); networkRegistered=true }
@@ -233,8 +241,22 @@ class MainActivity: Activity() {
         library.loadAsync(onFailure={ problem ->
             if(!isDestroyed) { libraryLoadError=problem; if(foreground) showLibraryError(problem) }
         }) {
-            if(!isDestroyed && foreground) { applyPlaybackCacheLimit(); showCatalog(load=true); favoriteMonitor.check() }
+            if(!accountRestoreStarted) {
+                accountRestoreStarted=true
+                account.restore {
+                    accountReady=true
+                    if(!isDestroyed && foreground) { applyPlaybackCacheLimit(); showCatalog(load=true); favoriteMonitor.check() }
+                }
+            } else if(accountReady && !isDestroyed && foreground) {
+                applyPlaybackCacheLimit(); showCatalog(load=true); favoriteMonitor.check()
+            }
         }
+    }
+    private fun accountLabel(): String = "红果账号  ·  " + if(account.status().signedIn) "已登录" else "扫码登录"
+    private fun refreshAccountHistory() {
+        if(!accountReady || !foreground || screen!="catalog") return
+        if(tab==0 && collection==null) homeScreen?.updateShelves(homeShelves())
+        else if(tab==4 || collection=="resume") showCatalog()
     }
     private fun applyPlaybackCacheLimit() {
         if(::playbackCache.isInitialized && ::library.isInitialized && library.isLoaded) {
@@ -273,7 +295,7 @@ class MainActivity: Activity() {
         homeScreen=null; selectionPreview=null; catalogScroll=null
         nav.clear(); typeButtons.clear(); searchInput=null; searchButton=null; searchStatus=null; searchActions.clear()
         historyManage=null; rankRefresh=null; rankSubtitle=null; collectionBack=null; favoriteBadges.clear()
-        favoriteStatus=null; favoriteCheck=null; homeUpdates=null; resumeCards.clear()
+        favoriteStatus=null; favoriteCheck=null; homeUpdates=null; accountButton=null; resumeCards.clear()
         catalogCards.clear(); cardImages.clear()
     }
     private fun <T> work(action: ()->T,done: (T)->Unit,failed: (Throwable)->Unit) {
@@ -768,6 +790,9 @@ class MainActivity: Activity() {
         }
         lateinit var playbackCacheButton: TextView
         playbackCacheButton=setting(device,playbackCacheLabel()) { showPlaybackCachePicker(playbackCacheButton) }
+        lateinit var accountSetting: TextView
+        accountSetting=setting(device,accountLabel()) { tvTools.account(account,accountSetting) }
+        accountButton=accountSetting
         lateinit var backup: TextView
         backup=setting(device,"手机备份与恢复") {
             runCatching { LibraryBackup.encode(library.snapshot()) }.onSuccess { encoded ->
@@ -788,7 +813,7 @@ class MainActivity: Activity() {
         val license=setting(device,"开源许可") {
             AlertDialog.Builder(this).setTitle("开源许可").setMessage("本原生版以 GPL-3.0 发布。\n内容协议与加密处理移植自 drpys（22261ad）。\nAndroidX Media3 / OkHttp：Apache-2.0\nKotlin：Apache-2.0\nBouncy Castle：MIT\n完整源码和许可证见 GitHub：N3urda/hongguoTV-updates。").setPositiveButton("关闭",null).show()
         }
-        val left=listOf(qualityButton,defaultSpeed,frame,autoNextButton); val right=listOf(playbackCacheButton,backup,hidden,updates,license)
+        val left=listOf(qualityButton,defaultSpeed,frame,autoNextButton); val right=listOf(playbackCacheButton,accountSetting,backup,hidden,updates,license)
         listOf(left,right).forEach { items -> items.forEachIndexed { index,view ->
             view.nextFocusUpId=items.getOrNull(index-1)?.id ?: nav[tab].id
             view.nextFocusDownId=items.getOrNull(index+1)?.id ?: view.id
@@ -796,7 +821,7 @@ class MainActivity: Activity() {
         left.forEachIndexed { i,v -> v.nextFocusLeftId=v.id; v.nextFocusRightId=right.getOrNull(i)?.id ?: v.id }
         right.forEachIndexed { i,v -> v.nextFocusLeftId=left.getOrNull(i)?.id ?: v.id; v.nextFocusRightId=v.id }
         nav.forEach { it.nextFocusDownId=qualityButton.id }
-        parent.addView(text("红果 TV  /  ${BuildConfig.VERSION_NAME}    ·    收藏与进度保存在本机",12f,muted).apply { setPadding(dp(2),dp(18),0,dp(10)) })
+        parent.addView(text("红果 TV  /  ${BuildConfig.VERSION_NAME}    ·    登录红果账号可同步观看进度",12f,muted).apply { setPadding(dp(2),dp(18),0,dp(10)) })
         nav[tab].requestFocus()
     }
     private fun runSearch(value: String,type: ContentType=library.contentType) {
@@ -829,7 +854,7 @@ class MainActivity: Activity() {
         work({ repository.detail(series.id) }, { result ->
             detail=result; library.observeFavorite(series.id,result.episodes.size,System.currentTimeMillis(),acknowledge=true)
             val progress=library.progress(series.id)
-            val target=ResumePlayback.target(result.episodes,progress?.episodeId,progress?.position ?: 0,progress?.completed==true)
+            val target=ResumePlayback.target(result.episodes,progress?.episodeId,progress?.position ?: 0,progress?.completed==true,progress?.episodeIndex)
             episodeIndex=target.index; group=episodeIndex/20
             if(resume) playEpisode(target.index,target.position,autoplay=detailAutoplay) else showDetail(false)
         }, { problem -> error(body,problem) { openDetail(series,resume,detailAutoplay) } })
@@ -848,10 +873,11 @@ class MainActivity: Activity() {
         info.addView(synopsis)
         val actions=row(); actions.setPadding(0,dp(12),0,0); info.addView(actions)
         val progress=library.progress(data.series.id)
-        val resumeIndex=progress?.let { data.episodes.indexOf(it.episodeId).takeIf { n -> n>=0 } } ?: 0
-        val resumePosition=progress?.takeIf { !it.completed && resumeIndex==it.episodeIndex }?.position ?: 0
+        val resumeTarget=ResumePlayback.target(data.episodes,progress?.episodeId,progress?.position ?: 0,progress?.completed==true,progress?.episodeIndex)
+        val resumeIndex=resumeTarget.index
+        val resumePosition=if(progress!=null && !progress.completed && resumeIndex!=progress.episodeIndex) 0 else resumeTarget.position
         val watched=library.watched(data.series.id)
-        val play=addButton(actions,if(watched) "重新观看" else if(progress!=null && !progress.completed) "继续第 ${resumeIndex+1} 集" else "开始观看") { playEpisode(if(watched) 0 else if(progress?.completed==true) (resumeIndex+1).coerceAtMost(data.episodes.lastIndex) else resumeIndex,if(watched) 0 else resumePosition) }
+        val play=addButton(actions,if(watched) "重新观看" else if(progress!=null && !progress.completed) "继续第 ${resumeIndex+1} 集" else "开始观看") { playEpisode(if(watched) 0 else resumeIndex,if(watched) 0 else resumePosition) }
         lateinit var favorite: TextView
         favorite=addButton(actions,if(library.favorite(data.series.id)) "已收藏" else "收藏") {
             favoriteMonitor.stop()
@@ -1372,7 +1398,7 @@ class MainActivity: Activity() {
     override fun onResume() {
         super.onResume(); foreground=true; main.removeCallbacks(tick); main.post(tick)
         updater.resume()
-        if(library.isLoaded) {
+        if(library.isLoaded && accountReady) {
             applyPlaybackCacheLimit()
             if(initialCatalogPending) showCatalog(load=true)
             else if(restoreStoppedPage) {
@@ -1393,7 +1419,7 @@ class MainActivity: Activity() {
         updater.pause()
         foreground=false; main.removeCallbacks(tick); cancelRecovery(); cancelPrefetch(); cancelCachePrefetch(); mediaSession.deactivate()
         sleepTimer.cancel(); favoriteMonitor.stop(); detailAutoplay=false; requestedAutoplay=false; pausedForLifecycle=true
-        player?.pause(); saveProgress(); library.flush(); super.onPause()
+        player?.pause(); saveProgress(); library.flush(); account.requestSync(); super.onPause()
     }
     override fun onStop() {
         restoreStoppedPage=true; generation++; cancelWork(); tvTools.close()
@@ -1408,7 +1434,7 @@ class MainActivity: Activity() {
     override fun onDestroy() {
         generation++; cancelWork()
         if(networkRegistered) connectivity.unregisterNetworkCallback(networkCallback)
-        favoriteMonitor.destroy(); tvTools.destroy(); updater.destroy(); saveProgress(); releasePlayer(); library.close()
+        favoriteMonitor.destroy(); tvTools.destroy(); updater.destroy(); saveProgress(); releasePlayer(); account.close(); library.close()
         artwork.close(); releaseCatalogViews(); mediaSession.release(); main.removeCallbacksAndMessages(null)
         io.shutdownNow(); prefetchWorker.shutdownNow(); cachePrefetchWorker.shutdownNow(); networkCleanup.shutdown()
         Thread({ repository.http.dispatcher.cancelAll(); repository.http.connectionPool.evictAll(); repository.http.dispatcher.executorService.shutdown() },"hongguotv-network-cleanup").start()

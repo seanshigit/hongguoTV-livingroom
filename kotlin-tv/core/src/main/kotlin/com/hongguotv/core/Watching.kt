@@ -19,9 +19,10 @@ class RecoveryBudget {
 
 data class ResumeTarget(val index: Int,val position: Long)
 object ResumePlayback {
-    fun target(episodes: List<String>,episodeId: String?,position: Long,completed: Boolean): ResumeTarget {
+    fun target(episodes: List<String>,episodeId: String?,position: Long,completed: Boolean,indexHint: Int? = null): ResumeTarget {
         require(episodes.isNotEmpty())
-        val index=episodes.indexOf(episodeId)
+        val index=episodes.indexOf(episodeId).takeIf { it>=0 }
+            ?: indexHint?.takeIf { episodeId.isNullOrBlank() && it in episodes.indices } ?: -1
         if(index<0) return ResumeTarget(0,0)
         return if(completed) ResumeTarget((index+1).coerceAtMost(episodes.lastIndex),0)
             else ResumeTarget(index,position.coerceAtLeast(0))

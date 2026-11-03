@@ -36,6 +36,13 @@ class WatchingTest {
         assertEquals(ResumeTarget(0,0),ResumePlayback.target(episodes,"removed",52000,false))
         assertEquals(ResumeTarget(1,0),ResumePlayback.target(episodes,"a",-100,false))
     }
+
+    @Test fun `cloud history without a video id resumes by a valid episode index`() {
+        val episodes = listOf("a", "b", "c")
+        assertEquals(ResumeTarget(1, 12000), ResumePlayback.target(episodes, "", 12000, false, 1))
+        assertEquals(ResumeTarget(0, 0), ResumePlayback.target(episodes, "removed", 12000, false, 1))
+        assertEquals(ResumeTarget(0, 0), ResumePlayback.target(episodes, "", 12000, false, 9))
+    }
     @Test fun `automatic recovery is bounded until the user starts a new attempt`() {
         val budget=RecoveryBudget()
         assertEquals(1000L,budget.delayMillis); assertTrue(budget.consume())

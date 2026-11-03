@@ -61,6 +61,16 @@ class LibraryIndexTest {
         assertEquals(498, state.updatedFavorites())
     }
 
+    @Test fun `account history can retain more than the guest history limit`() {
+        val all = (1..250).map { progress(it) }
+        val account = LibraryIndex(data().copy(history = all), historyLimit = Int.MAX_VALUE)
+        assertEquals(250, account.history().size)
+        account.save(progress(251, updated = 1000))
+        assertEquals(251, account.history().size)
+        assertNotNull(account.progress("1"))
+        assertEquals(200, LibraryIndex(data().copy(history = all)).history().size)
+    }
+
     @Test fun `captured snapshots survive later mutations and keep backup merge semantics`() {
         val state = LibraryIndex(data(), mapOf("1" to FavoriteUpdate(81, 80, 10)))
         val saved = state.snapshot()

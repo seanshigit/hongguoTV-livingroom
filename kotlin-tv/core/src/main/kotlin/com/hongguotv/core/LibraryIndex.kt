@@ -5,12 +5,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Main-thread-owned library. JSON is parsed once, and getters never parse or sort. */
-class LibraryIndex(data: BackupData, updates: Map<String, FavoriteUpdate> = emptyMap()) {
+class LibraryIndex(data: BackupData, updates: Map<String, FavoriteUpdate> = emptyMap(), private val historyLimit: Int = 200) {
     private var favoriteRows = data.favorites.distinctBy { it.id }.take(500)
     private var favoriteIds = favoriteRows.map { it.id }.toSet()
     private var laterRows = data.later.distinctBy { it.id }.take(100)
     private var laterIds = laterRows.map { it.id }.toSet()
-    private var historyRows = data.history.sortedByDescending { it.updatedAt }.distinctBy { it.series.id }.take(200)
+    private var historyRows = data.history.sortedByDescending { it.updatedAt }.distinctBy { it.series.id }.take(historyLimit)
     private val progressById = historyRows.associateBy { it.series.id }.toMutableMap()
     private var watchedIds = data.watched.toSet()
     private var hiddenIds = data.hidden.take(500).toSet()
@@ -51,7 +51,7 @@ class LibraryIndex(data: BackupData, updates: Map<String, FavoriteUpdate> = empt
     fun save(progress: BackupProgress): Boolean {
         val previous = progressById[progress.series.id]
         if (previous != null && previous.copy(updatedAt = progress.updatedAt) == progress) return false
-        historyRows = (listOf(progress) + historyRows.filterNot { it.series.id == progress.series.id }).take(200).sortedByDescending { it.updatedAt }
+        historyRows = (listOf(progress) + historyRows.filterNot { it.series.id == progress.series.id }).take(historyLimit).sortedByDescending { it.updatedAt }
         progressById.clear()
         historyRows.forEach { progressById[it.series.id] = it }
         return true
