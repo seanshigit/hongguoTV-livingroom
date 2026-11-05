@@ -1,6 +1,6 @@
 # 电视应用内自动更新
 
-更新渠道：[seanminjie-del/hongguoTV-livingroom](https://github.com/seanminjie-del/hongguoTV-livingroom/releases)。**先手动覆盖安装 0.12.0-local**，接入本仓库渠道；此前 0.10/0.11 的更新器指向上游仓库，不能自动获取本仓库版本。
+更新渠道：[seanminjie-del/hongguoTV-livingroom](https://github.com/seanminjie-del/hongguoTV-livingroom/releases)。**先手动覆盖安装 0.12.0-local**，接入本仓库渠道；此前 0.10/0.11 的更新器指向上游仓库，不能自动获取本仓库版本。0.14.14 起，GitHub 检查或下载失败时会尝试 [KVM 备用源](https://kvm.fullcoin.com/hongguotv-update/update.json)；更早版本要先从 GitHub 更新或手动覆盖安装 0.14.14，才具备备用能力。
 
 ## 电视上的使用
 
@@ -34,6 +34,8 @@ python3 kotlin-tv/distribution/prepare-update.py \
 4. 从同一提交用 `git archive` 导出源码 ZIP，计算附件 SHA256SUMS；先创建 GitHub Release 草稿，上传 APK、源码、update.json 和校验和，核对远端附件大小及 digest 后发布并设为 latest。不要覆盖已发布版本附件，也不要将较旧版本设为 latest。
 5. 对比公开清单与下载附件，验证电视旧版实际检查、下载、校验和系统安装，然后检查版本与本机记录。保留前版 Release 供人工回退下载；客户端不会自动降级。
 
+KVM 的 `hongguotv-mirror.timer` 约每 15 分钟运行 `distribution/mirror_update.py`：从 GitHub 获取最新清单，校验包大小和 SHA-256，先保存安装包再原子替换清单。同步失败保留上一版，较旧版本或同一版本被替换的安装包不会覆盖当前版本；电视仍会在安装前核对包名、版本和签名。
+
 本地工具回归使用真实 0.11/0.10 APK：设置 `UPDATE_APK`、`PREVIOUS_APK`、`ANDROID_BUILD_TOOLS` 后运行 `python3 kotlin-tv/distribution/test_prepare_update.py`。渠道迁移验收：构建测试 APK 时设置 `HONGGUOTV_TEST_RUNNER=com.hongguotv.nativeapp.UpdateAcceptance`，在测试设备运行该 Instrumentation；默认仍使用原 TvAcceptance。
 
-电视网络需可访问 GitHub 及其附件 CDN，系统需提供安装器与未知来源授权入口。实体电视和 Android8 本轮升级仍需实机确认。
+电视网络需能访问 GitHub 及其附件 CDN 或 KVM 备用源，系统需提供安装器与未知来源授权入口。实体电视和 Android8 本轮升级仍需实机确认。

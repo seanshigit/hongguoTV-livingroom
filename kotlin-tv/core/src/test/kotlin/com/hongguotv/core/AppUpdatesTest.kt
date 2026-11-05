@@ -1,5 +1,10 @@
 package com.hongguotv.core
 
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -19,6 +24,69 @@ class AppUpdatesTest {
     private fun withFile(block: (File) -> Unit) {
         val dir = Files.createTempDirectory("update-test").toFile()
         try { block(File(dir, "update.apk")) } finally { dir.deleteRecursively() }
+    }
+    private fun repository(handler: (Request) -> Response): AppUpdateRepository {
+        val client = OkHttpClient.Builder().addInterceptor { handler(it.request()) }.build()
+        return AppUpdateRepository().also {
+            AppUpdateRepository::class.java.getDeclaredField("http").apply { isAccessible = true }.set(it, client)
+        }
+    }
+    private fun response(request: Request, status: Int, body: ByteArray) = Response.Builder()
+        .request(request).protocol(Protocol.HTTP_1_1).code(status).message("test")
+        .body(body.toResponseBody()).build()
+    @Test fun checksKvmWhenGithubIsUnavailable() {
+        repository { request ->
+            when (request.url.host) {
+                "github.com" -> throw IOException("unreachable")
+                "kvm.fullcoin.com" -> {
+                    assertEquals("/hongguotv-update/update.json", request.url.encodedPath)
+                    response(request, 200, json().toString().toByteArray())
+                }
+                else -> throw AssertionError("unexpected update host")
+            }
+        }.use { assertEquals(10001L, it.latest().versionCode) }
+    }
+    @Test fun downloadsFromKvmWhenGithubIsUnavailable() = withFile { file ->
+        repository { request ->
+            when (request.url.host) {
+                "github.com" -> throw IOException("unreachable")
+                "kvm.fullcoin.com" -> {
+                    assertEquals("/hongguotv-update/releases/kotlin-v0.9.0-build.1/hongguotv-kotlin-0.9.0-build.1-android8.apk", request.url.encodedPath)
+                    response(request, 200, bytes)
+                }
+                else -> throw AssertionError("unexpected update host")
+            }
+        }.use { it.download(update(), file) {} }
+        assertArrayEquals(bytes, file.readBytes())
+    }
+    @Test fun corruptedKvmDownloadCannotReplaceExistingFile() = withFile { file ->
+        file.writeText("previous")
+        var reachedMirror = false
+        repository { request ->
+            when (request.url.host) {
+                "github.com" -> throw IOException("unreachable")
+                "kvm.fullcoin.com" -> { reachedMirror = true; response(request, 200, ByteArray(bytes.size)) }
+                else -> throw AssertionError("unexpected update host")
+            }
+        }.use { assertThrows(IOException::class.java) { it.download(update(), file) {} } }
+        assertTrue(reachedMirror)
+        assertEquals("previous", file.readText())
+        assertFalse(File(file.path + ".part").exists())
+    }
+    @Test fun githubMetadataTakesPrecedenceOverMirror() {
+        repository { request ->
+            if (request.url.host != "github.com") throw AssertionError("mirror requested despite working primary")
+            response(request, 200, json().toString().toByteArray())
+        }.use { assertEquals(10001L, it.latest().versionCode) }
+    }
+    @Test fun interruptedCheckDoesNotStartAnotherNetworkRequest() {
+        var contacted = false
+        repository { _ -> contacted = true; throw IOException("unreachable") }.use { repository ->
+            Thread.currentThread().interrupt()
+            try { assertThrows(IOException::class.java) { repository.latest() } }
+            finally { Thread.interrupted() }
+        }
+        assertFalse(contacted)
     }
     @Test fun onlyHigherCompatibleVersionsAreUpdates() {
         val update = update()

@@ -18,6 +18,7 @@ data class AppUpdate(val versionCode: Long, val versionName: String, val minSdk:
     companion object {
         const val REPOSITORY = "seanminjie-del/hongguoTV-livingroom"
         const val RELEASES = "https://github.com/$REPOSITORY/releases"
+        const val MIRROR = "https://kvm.fullcoin.com/hongguotv-update"
         const val MAX_APK_BYTES = 80L * 1024 * 1024
         fun parse(json: String): AppUpdate {
             val o = JSONObject(json)
@@ -70,17 +71,25 @@ class AppUpdateRepository : java.io.Closeable {
     private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.MINUTES).addNetworkInterceptor { chain ->
             val url = chain.request().url
-            // Follow GitHub's CDN redirects, never cleartext or arbitrary manifest-provided hosts.
-            if (url.scheme != "https" || url.host !in setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"))
+            // Follow GitHub's CDN redirects or the fixed mirror, never arbitrary hosts.
+            if (url.scheme != "https" || url.host !in setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "kvm.fullcoin.com"))
                 throw IOException("更新下载地址不受支持")
             chain.proceed(chain.request())
         }.build()
     private fun request(url: String) = Request.Builder().url(url).header("User-Agent", "HongguoTV-Updater")
         .header("Cache-Control", "no-cache").build()
-    fun latest(): AppUpdate {
-        val call = http.newCall(request("${AppUpdate.RELEASES}/latest/download/update.json"))
+    private inline fun <T> sources(urls: List<String>, action: (String) -> T): T {
+        var failure: IOException? = null
+        for (url in urls) {
+            if (Thread.currentThread().isInterrupted) throw IOException("更新已取消", failure)
+            try { return action(url) } catch (e: IOException) { failure = e }
+        }
+        throw failure ?: IOException("更新失败，请稍后重试")
+    }
+    fun latest(): AppUpdate = sources(listOf("${AppUpdate.RELEASES}/latest/download/update.json", "${AppUpdate.MIRROR}/update.json")) { url ->
+        val call = http.newCall(request(url))
         call.timeout().timeout(25, TimeUnit.SECONDS)
-        return call.execute().use { response ->
+        call.execute().use { response ->
             if (!response.isSuccessful) throw IOException(if (response.code == 404) "尚无可用的自动更新版本" else "无法检查更新，请稍后重试")
             val bytes = response.body?.byteStream()?.use { input ->
                 val out = ByteArrayOutputStream(); val buffer = ByteArray(4096)
@@ -92,11 +101,13 @@ class AppUpdateRepository : java.io.Closeable {
     }
     fun download(update: AppUpdate, file: File, progress: (Int) -> Unit) {
         if (UpdateFiles.verify(file, update)) return
-        http.newCall(request(update.downloadUrl)).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("安装包下载失败，请稍后重试")
-            val body = response.body ?: throw IOException("安装包为空")
-            if (body.contentLength() >= 0 && body.contentLength() != update.size) throw IOException("安装包长度异常")
-            body.byteStream().use { UpdateFiles.receive(it, file, update, progress) }
+        sources(listOf(update.downloadUrl, "${AppUpdate.MIRROR}/releases/${update.tag}/${update.fileName}")) { url ->
+            http.newCall(request(url)).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("安装包下载失败，请稍后重试")
+                val body = response.body ?: throw IOException("安装包为空")
+                if (body.contentLength() >= 0 && body.contentLength() != update.size) throw IOException("安装包长度异常")
+                body.byteStream().use { UpdateFiles.receive(it, file, update, progress) }
+            }
         }
     }
     fun cancel() = http.dispatcher.cancelAll()
