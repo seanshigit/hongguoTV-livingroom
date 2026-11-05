@@ -5,11 +5,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 
-data class BackupProgress(val series: Series,val episodeId: String,val episodeIndex: Int,val position: Long,val duration: Long,val completed: Boolean,val updatedAt: Long) {
+data class CloudSeriesMetadata(val episodeCount: Int, val seasonIndex: Int, val multiSeason: Boolean) {
+    init { require(episodeCount in 1..10000 && seasonIndex in 0..10000) }
+}
+data class BackupProgress(val series: Series,val episodeId: String,val episodeIndex: Int,val position: Long,val duration: Long,val completed: Boolean,val updatedAt: Long,val cloudMetadata: CloudSeriesMetadata?=null) {
     fun json()=JSONObject().put("series",LibraryBackup.seriesJson(series)).put("episodeId",episodeId).put("episodeIndex",episodeIndex).put("position",position).put("duration",duration).put("completed",completed).put("updatedAt",updatedAt)
 }
-data class BackupSettings(val quality: Int=1080,val speed: Float=1f,val autoNext: Boolean=true,val type: ContentType=ContentType.COMIC,val frame: VideoFrameMode=VideoFrameMode.FIT) {
-    fun json()=JSONObject().put("quality",quality).put("speed",speed.toDouble()).put("autoNext",autoNext).put("type",type.storedValue).put("frame",frame.name)
+data class BackupSettings(val quality: Int=1080,val speed: Float=1f,val autoNext: Boolean=true,val type: ContentType=ContentType.COMIC,val frame: VideoFrameMode=VideoFrameMode.FIT,val playbackCacheMb: Long=256) {
+    fun json()=JSONObject().put("quality",quality).put("speed",speed.toDouble()).put("autoNext",autoNext).put("type",type.storedValue).put("frame",frame.name).put("cacheMb",playbackCacheMb)
 }
 data class BackupData(val favorites: List<Series>,val history: List<BackupProgress>,val watched: Set<String>,val searches: List<RecentSearch>,val settings: BackupSettings,val later: List<Series> = emptyList(),val hidden: Set<String> = emptySet())
 
@@ -17,7 +20,7 @@ object LibraryBackup {
     const val MAX_BYTES=2*1024*1024
     private val idPattern=Regex("[0-9]{1,30}")
     private fun id(value: String)=value.also { require(idPattern.matches(it)) { "剧集标识无效" } }
-    private fun cleanCover(value: String): String=runCatching {
+    internal fun cleanCover(value: String): String=runCatching {
         val uri=URI(value); val host=uri.host.orEmpty().lowercase()
         value.takeIf { it.length<=2048 && uri.scheme=="https" && uri.userInfo==null && host.isNotEmpty() && !host.contains(':') && !host.matches(Regex("[0-9.]+")) && host!="localhost" && !host.endsWith(".local") && !host.endsWith(".lan") && value.none(Char::isISOControl) }.orEmpty()
     }.getOrDefault("")
@@ -76,7 +79,12 @@ object LibraryBackup {
         val autoNext=settings.get("autoNext"); require(autoNext is Boolean)
         val type=ContentType.entries.firstOrNull { it.storedValue==settings.getString("type") } ?: error("内容类型无效")
         val frame=VideoFrameMode.entries.firstOrNull { it.name==settings.getString("frame") } ?: error("画面模式无效")
-        return BackupData(favorites,history,watchedIds,searches,BackupSettings(quality,speed.toFloat(),autoNext,type,frame),later,hiddenIds)
+        val cacheValue=settings.opt("cacheMb")
+        val cacheMb=if(cacheValue==null) 256L else cacheValue.let { value ->
+            require(value is Number && value.toLong().toDouble()==value.toDouble()) { "播放缓存大小无效" }
+            value.toLong().also { require(it in PlaybackCacheSize.options) { "播放缓存大小无效" } }
+        }
+        return BackupData(favorites,history,watchedIds,searches,BackupSettings(quality,speed.toFloat(),autoNext,type,frame,cacheMb),later,hiddenIds)
     }
     /** Existing favorites stay first; only newer imported progress replaces a local record. */
     fun merge(local: BackupData,incoming: BackupData,restoreSettings: Boolean): BackupData {

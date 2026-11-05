@@ -12,20 +12,46 @@ import org.junit.Test
 import java.io.IOException
 
 class ContentRepositoryTest {
+    @Test fun unavailableSupplementDoesNotStartAFullCatalogScan() {
+        var categoryRequests=0
+        val repo=repository { request ->
+            when {
+                request.url.host.contains("fqnovel") -> ""
+                request.url.encodedPath=="/api/search/result/" && request.url.queryParameter("query")=="聚宝仙盆第十五季" ->
+                    JSONObject().put("searchList",JSONArray().put(JSONObject().put("series_id","14")
+                        .put("series_title","聚宝仙盆之杂灵根才是真BOSS第十四季").put("genre","205")))
+                        .put("totalPages",1).put("hasMore",false).toString()
+                request.url.encodedPath=="/api/search/result/" -> ""
+                request.url.encodedPath.startsWith("/search/") -> websiteResults()
+                else -> {
+                    categoryRequests++
+                    """<script>_ROUTER_DATA={"loaderData":{"category_${'$'}":{"recommendList":[],"pagination":{"pageNum":1,"totalPages":1}}}};</script>"""
+                }
+            }
+        }
+        val search=SearchCatalog({ keyword,page,type -> repo.search(keyword,page,type) },supplement={ keyword,page,type -> repo.searchSupplement(keyword,page,type) })
+        assertEquals("14",search.page("聚宝仙盆第十五季",1,ContentType.COMIC).items.single().id)
+        assertEquals(0,categoryRequests)
+    }
     @Test fun upstreamPlaybackErrorKeepsItsCodeForRecoveryAndDiagnostics() {
         val repo=repository { """{"Code":110001,"Message":"未知异常"}""" }
         val error=assertThrows(IOException::class.java) { repo.stream("123") }
         assertTrue(error.message.orEmpty().contains("110001"))
     }
-    @Test fun playbackUsesIndependentVisitorIdentifiersPerRequest() {
+    @Test fun playbackReusesOneRegisteredIdentityAcrossRequests() {
         val visitors=mutableListOf<Pair<String?,String?>>()
-        val repo=repository { request ->
+        var registrations=0
+        val repo=ContentRepository(repositoryHttp { request ->
             visitors+=request.url.queryParameter("iid") to request.url.queryParameter("device_id")
             """{"Code":110001}"""
-        }
+        }, playbackSession=PlaybackDeviceSession {
+            registrations++
+            DeviceRegister.Registered("9007199254740993","9007199254741993")
+        })
         repeat(2) { assertThrows(IOException::class.java) { repo.stream("123") } }
-        assertNotEquals(visitors[0],visitors[1])
-        assertTrue(visitors.all { (iid,device) -> iid?.matches(Regex("[0-9]{16}"))==true && device?.matches(Regex("[0-9]{16}"))==true && iid!=device })
+        assertEquals(1,registrations)
+        assertEquals(visitors[0],visitors[1])
+        assertTrue(visitors.all { (iid,device) -> iid=="9007199254741993" && device=="9007199254740993" })
     }
 
     @Test fun playbackNeverSubstitutesAnotherEpisodeFromTheResponse() {
@@ -54,6 +80,77 @@ class ContentRepositoryTest {
     @Test fun compatibleLowerQualityWinsBeforeHigherResolutionFallback() {
         val repo=streamRepository(Triple(720,"bytevc2","https://example.com/unsupported"),Triple(480,"h264","https://example.com/avc"),Triple(1080,"bytevc1","https://example.com/hevc"))
         assertEquals("480P",repo.stream("123",720).quality)
+    }
+
+    @Test fun streamKeepsOtherPlayableVariantsForStartupFailover() {
+        val repo=streamRepository(Triple(720,"h264","https://example.com/720"),Triple(480,"h264","https://example.com/480"))
+        val result=repo.stream("123",720)
+        assertEquals("https://example.com/720",result.url)
+        assertEquals(listOf("https://example.com/480"),result.alternatives.map { it.url })
+    }
+
+    @Test fun streamIncludesAndDeduplicatesSameQualityBackupUrls() {
+        val repo=repository { request ->
+            if(request.url.host=="example.com") {
+                val row=JSONObject().put("vheight",720).put("codec_type","h264")
+                    .put("main_url","https://example.com/main")
+                    .put("backup_url","https://example.com/backup")
+                    .put("backup_url_list",JSONArray().put("https://example.com/backup-2").put("https://example.com/main"))
+                JSONObject().put("video_info",JSONObject().put("data",JSONObject().put("video_list",JSONObject().put("video_0",row)))).toString()
+            } else """{"data":{"123":{"video_model":{"fallback_api":"https://example.com/stream"}}}}"""
+        }
+        val result=repo.stream("123",720)
+        assertEquals(listOf("https://example.com/main","https://example.com/backup","https://example.com/backup-2"),
+            result.candidates().map { it.url })
+    }
+
+    @Test fun streamTriesTheNextFallbackApiWhenTheFirstOneHasNoVideo() {
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                JSONObject().put("code",0).put("data",JSONObject().put("123",JSONObject().put("video_model",
+                    JSONObject().put("fallback_api",JSONArray(listOf("https://example.com/bad","https://example.com/good")))))).toString()
+            } else if(request.url.encodedPath=="/bad") {
+                "{}"
+            } else {
+                val row=JSONObject().put("vheight",720).put("codec_type","h264").put("main_url","https://example.com/video")
+                JSONObject().put("video_info",JSONObject().put("data",JSONObject().put("video_list",JSONObject().put("video_0",row)))).toString()
+            }
+        }
+        assertEquals("https://example.com/video",repo.stream("123",720).url)
+    }
+
+    @Test fun streamRetriesAnEmptyProviderResponseWithAFreshSignedRequest() {
+        var calls=0
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                calls++
+                if(calls<3) "" else JSONObject().put("code",0).put("data",JSONObject().put("123",JSONObject().put("video_model",
+                    JSONObject().put("fallback_api","https://example.com/good")))).toString()
+            } else {
+                val row=JSONObject().put("vheight",720).put("codec_type","h264").put("main_url","https://example.com/video")
+                JSONObject().put("video_info",JSONObject().put("data",JSONObject().put("video_list",JSONObject().put("video_0",row)))).toString()
+            }
+        }
+        assertEquals("https://example.com/video",repo.stream("123",720).url)
+        assertEquals(3,calls)
+    }
+
+    @Test fun streamRetriesAValidProviderResponseThatHasNoVideoResources() {
+        var fallbackCalls=0
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                JSONObject().put("code",0).put("data",JSONObject().put("123",JSONObject().put("video_model",
+                    JSONObject().put("fallback_api","https://example.com/good")))).toString()
+            } else {
+                fallbackCalls++
+                if(fallbackCalls<3) "{}" else {
+                    val row=JSONObject().put("vheight",720).put("codec_type","h264").put("main_url","https://example.com/video")
+                    JSONObject().put("video_info",JSONObject().put("data",JSONObject().put("video_list",JSONObject().put("video_0",row)))).toString()
+                }
+            }
+        }
+        assertEquals("https://example.com/video",repo.stream("123",720).url)
+        assertEquals(3,fallbackCalls)
     }
 
     @Test fun entirelyIncompatibleSourceFailsBeforeStartingAudio() {
@@ -88,11 +185,12 @@ class ContentRepositoryTest {
     }
 
     private fun repository(clock: () -> Long = System::currentTimeMillis, respond: (Request) -> String) = ContentRepository(
-        OkHttpClient.Builder().addInterceptor { chain ->
+        repositoryHttp(respond),clock,PlaybackDeviceSession { DeviceRegister.Registered("12345","67890") })
+
+    private fun repositoryHttp(respond: (Request) -> String) = OkHttpClient.Builder().addInterceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(200).message("OK").body(respond(chain.request()).toResponseBody()).build()
-        }.build(),clock
-    )
+        }.build()
 
     private fun rankPayload(page: Int = 1, totalPages: Int = 2) = JSONObject()
         .put("isSuccess",true)
@@ -247,6 +345,34 @@ class ContentRepositoryTest {
         assertFalse(result.hasMore)
     }
 
+    @Test fun titleFallbackSearchReadsPastTheLegacyHundredPageLimit() {
+        val targetPage=101
+        val repo=repository { request ->
+            if(request.url.host != "hongguoduanju.com") return@repository ""
+            if(request.url.encodedPath.startsWith("/search/")) return@repository "<script>_ROUTER_DATA={\"loaderData\":{}};</script>"
+            val page=request.url.queryParameter("page")?.toIntOrNull() ?: 1
+            val title=if(page==targetPage) "第 101 页的修仙剧" else "片库剧 $page"
+            val id="100000000000000000$page"
+            """<script>_ROUTER_DATA={"loaderData":{"category_$":{"recommendList":[{"series_id":"$id","series_name":"$title"}],"pagination":{"pageNum":$page,"totalPages":$targetPage}}}};</script>"""
+        }
+        val result=repo.search("第 101 页",1,ContentType.SHORT)
+        assertTrue("items=${result.items.map { it.title }}", result.items.any { it.title=="第 101 页的修仙剧" })
+        assertTrue(result.notice.contains("已检索"))
+    }
+
+    @Test fun titleFallbackSearchIncludesDynamicCategoryPages() {
+        val repo=repository { request ->
+            if(request.url.host != "hongguoduanju.com") return@repository ""
+            if(request.url.encodedPath.startsWith("/search/")) return@repository "<script>_ROUTER_DATA={\"loaderData\":{}};</script>"
+            if(request.url.encodedPath=="/category/real-drama/romance") {
+                return@repository """<script>_ROUTER_DATA={"loaderData":{"category_$":{"recommendList":[{"series_id":"9000000000000000001","series_name":"分类页爱情修仙剧"}],"pagination":{"pageNum":1,"totalPages":1}}}};</script>"""
+            }
+            """<script>_ROUTER_DATA={"loaderData":{"category_$":{"selectorList":[{"items":[{"selector_item_id":"romance","show_name":"爱情"}]}],"recommendList":[{"series_id":"9000000000000000002","series_name":"基础片库剧"}],"pagination":{"pageNum":1,"totalPages":1}}}};</script>"""
+        }
+        val result=repo.search("分类页爱情修仙",1,ContentType.SHORT)
+        assertTrue(result.items.any { it.title=="分类页爱情修仙剧" })
+    }
+
     private fun searchTab(type: Int,id: String) = JSONObject().put("tab_type",type).put("has_more",true)
         .put("data",JSONArray().put(JSONObject().put("video_data",JSONArray().put(JSONObject()
             .put("series_id",id).put("title","测试剧集").put("episode_cnt",8)))))
@@ -269,7 +395,80 @@ class ContentRepositoryTest {
         var requests=0
         val repo=repository { requests++; """{"code":0,"search_tabs":[{"tab_type":19,"data":[],"has_more":false}]}""" }
         assertTrue(repo.search("无结果",1,ContentType.COMIC).items.isEmpty())
-        assertEquals(1,requests)
+        assertEquals(2,requests)
+    }
+
+    @Test fun emptyComicAppTabFallsBackToTheTypeSpecificPublicSearch() {
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                """{"code":0,"search_tabs":[{"tab_type":19,"data":[],"has_more":false}]}"""
+            } else if(request.url.encodedPath=="/api/search/result/") {
+                JSONObject().put("searchList",JSONArray().put(JSONObject().put("series_id","909").put("series_name","公开漫剧结果").put("genre","205")))
+                    .put("totalCount",1).put("totalPages",1).put("hasMore",false).toString()
+            } else error("unexpected request ${request.url}")
+        }
+        assertEquals("909",repo.search("修仙",1,ContentType.COMIC).items.single().id)
+    }
+
+    @Test fun emptyValidShortSearchFallsBackToThePublicCatalog() {
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                """{"code":0,"search_tabs":[{"tab_type":11,"data":[],"has_more":false}]}"""
+            } else if(request.url.encodedPath.startsWith("/search/")) {
+                websiteResults()
+            } else {
+                """<script>_ROUTER_DATA={"loaderData":{"category_$":{"recommendList":[{"series_id":"777","series_name":"目录中的短剧"}],"pagination":{"pageNum":1,"totalPages":1}}}};</script>"""
+            }
+        }
+        assertEquals("777",repo.search("目录中的短剧",1,ContentType.SHORT).items.single().id)
+    }
+
+    @Test fun publicSearchEndpointFiltersTypesAndContinuesPages() {
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) ""
+            else if(request.url.encodedPath=="/api/search/result/") {
+                val page=request.url.queryParameter("page")?.toIntOrNull() ?: 1
+                val row=if(page==1) JSONObject().put("series_id","701").put("series_name","修仙短剧一").put("genre","203")
+                else JSONObject().put("series_id","702").put("series_name","修仙短剧二").put("genre","203")
+                JSONObject().put("searchList",JSONArray().put(row).put(JSONObject().put("series_id","799").put("series_name","修仙漫剧").put("genre","205")))
+                    .put("totalCount",2).put("pageNum",page).put("totalPages",2).put("hasMore",page<2).toString()
+            } else error("unexpected request ${request.url}")
+        }
+        val first=repo.search("修仙",1,ContentType.SHORT)
+        assertEquals(listOf("701"),first.items.map { it.id }); assertTrue(first.hasMore)
+        val second=repo.search("修仙",2,ContentType.SHORT)
+        assertEquals(listOf("702"),second.items.map { it.id }); assertFalse(second.hasMore)
+    }
+
+    @Test fun emptyAppPageFallsBackToThePublicCatalog() {
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                if(request.url.queryParameter("offset")=="0") {
+                    JSONObject().put("code",0).put("search_tabs",JSONArray().put(searchTab(11,"111").put("has_more",true))).toString()
+                } else ""
+            } else if(request.url.encodedPath.startsWith("/search/")) {
+                websiteResults()
+            } else {
+                """<script>_ROUTER_DATA={"loaderData":{"category_$":{"recommendList":[{"series_id":"777","series_name":"修仙官网片库结果"}],"pagination":{"pageNum":1,"totalPages":1}}}};</script>"""
+            }
+        }
+        assertEquals("111",repo.search("修仙",1,ContentType.SHORT).items.single().id)
+        assertEquals("777",repo.search("修仙",2,ContentType.SHORT).items.single().id)
+    }
+
+    @Test fun unavailableAppPageFallsBackToThePublicCatalog() {
+        val repo=repository { request ->
+            if(request.url.host.contains("fqnovel")) {
+                if(request.url.queryParameter("offset")=="0") {
+                    JSONObject().put("code",0).put("search_tabs",JSONArray().put(searchTab(11,"111").put("has_more",true))).toString()
+                } else JSONObject().put("code",1).toString()
+            } else if(request.url.encodedPath=="/api/search/result/") {
+                JSONObject().put("searchList",JSONArray().put(JSONObject().put("series_id","778").put("series_name","修仙公开结果").put("genre","203")))
+                    .put("totalCount",1).put("totalPages",1).put("hasMore",false).toString()
+            } else error("unexpected request ${request.url}")
+        }
+        assertEquals("111",repo.search("修仙",1,ContentType.SHORT).items.single().id)
+        assertEquals("778",repo.search("修仙",2,ContentType.SHORT).items.single().id)
     }
 
     @Test fun missingComicTabDoesNotFallBackToShortResults() {
@@ -432,7 +631,7 @@ class ContentRepositoryTest {
             if(request.url.host.contains("fqnovel")) "" else {
                 if(request.url.encodedPath.startsWith("/search/")) return@repository websiteResults()
                 val page=request.url.queryParameter("page")?.toInt() ?: 1
-                if(page==1) firstReads++
+                if(request.url.encodedPath.contains("/category") && page==1) firstReads++
                 if(page==2 && failed) throw IOException("offline")
                 """<script>_ROUTER_DATA={"loaderData":{"category_$":{"recommendList":[{"series_id":"$page","series_name":"修仙$page"}],"pagination":{"totalPages":2,"pageNum":$page}}}};</script>"""
             }

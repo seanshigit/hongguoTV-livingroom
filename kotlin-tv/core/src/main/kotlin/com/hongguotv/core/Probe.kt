@@ -7,6 +7,11 @@ fun main(args: Array<String>) {
             val prefix=response.peekBody(16).bytes()
             println("searchTransport status=${response.code}; mime=${response.header("Content-Type")}; encoding=${response.header("Content-Encoding")}; bytes=${response.body?.contentLength()}; startsJson=${prefix.firstOrNull()?.toInt()==123}; prefixHex=${prefix.take(4).joinToString("") { "%02x".format(it) }}")
         }
+        if(chain.request().url.host=="log5-applog-lf.fqnovel.com") {
+            val body=response.peekBody(64*1024).string()
+            val registration=runCatching { org.json.JSONObject(body) }.getOrNull()
+            println("deviceRegistrationTransport status=${response.code}; bytes=${body.toByteArray(Charsets.UTF_8).size}; code=${registration?.opt("Code") ?: registration?.opt("code")}; hasDeviceId=${registration?.has("device_id") == true || registration?.has("device_id_str") == true}; hasInstallId=${registration?.has("install_id") == true || registration?.has("install_id_str") == true}")
+        }
         if(!response.isSuccessful) println("catalogTransport status=${response.code}; path=${chain.request().url.encodedPath}; page=${chain.request().url.queryParameter("page")}")
         if(chain.request().url.encodedPath.contains("multi_video_model")) {
             val data=runCatching { org.json.JSONObject(response.peekBody(16384).string()) }.getOrNull()
@@ -40,7 +45,7 @@ fun main(args: Array<String>) {
                 check(home.items.isNotEmpty() && home.items.distinctBy { it.id }.size==home.items.size)
                 println("type=${type.label}; home=${home.items.size}; sourcePages=${home.loadedPages}; shelves=${DiscoveryShelves.from(home.items).map { it.title to it.items.size }}; notice=${home.notice}")
                 val keyword=if(type==ContentType.COMIC) "修仙" else "总裁"
-                val results=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) })
+                val results=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) },supplement={ keyword,page,kind -> repository.searchSupplement(keyword,page,kind) })
                 val seen=mutableSetOf<String>()
                 for(page in 1..1000) {
                     val result=results.page(keyword,page,type)
@@ -50,7 +55,7 @@ fun main(args: Array<String>) {
                     if(!result.hasMore) break
                 }
                 val exact=home.items.first().title.take(80)
-                val matches=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) }).page(exact,1,type)
+                val matches=SearchCatalog({ keyword,page,kind -> repository.search(keyword,page,kind) },supplement={ keyword,page,kind -> repository.searchSupplement(keyword,page,kind) }).page(exact,1,type)
                 println("exactQuery=$exact; found=${matches.foundCount}; first=${matches.items.firstOrNull()?.title}; exactFound=${matches.items.any { it.title==exact }}")
             }
         } finally {

@@ -39,8 +39,8 @@ internal object ComicRank {
                         row.str("description"),if(count>0) "全 $count 集" else row.str("heatText"),
                         (0 until minOf(tags.length(),5)).joinToString(" · ") { tags.optString(it) })
                 }.filter { it.id.matches(Regex("[0-9]{1,30}")) && it.title.isNotBlank() }.distinctBy { it.id }
-                return CatalogPage(items,items.isNotEmpty() && page<minOf(totalPages,100),
-                    ComicRanking(positions.filterKeys { id -> items.any { it.id==id } },minOf(totalPages,100),updatedText))
+                return CatalogPage(items,items.isNotEmpty() && page<minOf(totalPages,MAX_CATALOG_PAGES),
+                    ComicRanking(positions.filterKeys { id -> items.any { it.id==id } },minOf(totalPages,MAX_CATALOG_PAGES),updatedText))
             }
             return renderedPage(document,html,page)
         } catch(e: IOException) { throw e } catch(e: Exception) { throw IOException("漫剧榜单格式已变化",e) }
@@ -69,6 +69,6 @@ internal object ComicRank {
         val paging=document.selectFirst("nav[aria-label=榜单分页]") ?: throw IOException("漫剧分页信息缺失")
         if(paging.selectFirst("[aria-current=page]")?.text()?.toIntOrNull()!=page) throw IOException("漫剧分页信息异常")
         val lastPage=maxOf(page,paging.select("a[href]").mapNotNull { it.attr("href").substringAfter("?page=","").substringBefore('&').toIntOrNull() }.maxOrNull() ?: page)
-        return CatalogPage(items,page<minOf(lastPage,100),ComicRanking(positions,minOf(lastPage,100),route.str("updatedText")))
+        return CatalogPage(items,page<minOf(lastPage,MAX_CATALOG_PAGES),ComicRanking(positions,minOf(lastPage,MAX_CATALOG_PAGES),route.str("updatedText")))
     }
 }

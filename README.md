@@ -19,15 +19,16 @@
 - **原生播放**：MP4 分段读取、兼容编码选择、断点续播与选集；异常提供错误码和重试入口。
 - **临时请求恢复**：片库与媒体分段 GET 遇到指定临时 HTTP / 传输故障时，退避 300、900 毫秒，最多三次请求；可取消、保留 Range 与画质，签名 POST 及数据校验失败不在请求层重放。
 - **Media3官方预加载**：本集接近结束时加载下一集开头3秒的音视频样本，换集复用已预加载媒体源；仅预载下一集，后台与低内存时清理。
+- **红果账号**：在设置中用红果短剧 App 扫码登录，双向同步观看集数和位置；登录前的游客记录可手动合并，收藏仍保存在本机。[账号版本验证](kotlin-tv/RELEASE_0.14.13-local.md)
 - **自动更新**：前台浏览时自动检查并下载本仓库新版，校验文件与签名后由系统确认安装；设置中可关闭自动更新或手动检查，播放时不打扰。[更新说明](kotlin-tv/AUTO_UPDATES.md)
 
 ![搜索实际运行截图](docs/screenshots/search.png)
 
 ## 安装与验证
 
-本轮电视版为 **0.14.2-local / versionCode 16**，包含《聚宝仙盆》第十四季等新季漏搜修复和真实画质判定修正。APK 沿用本地 debug 签名，包名 `com.hongguotv.nativeapp`，与 0.13 / 0.14 的证书相同。公开下载及自动更新以[本仓库最新 Release](https://github.com/seanshigit/hongguoTV-livingroom/releases/latest)的 `update.json` 为准，安装及验证见 [0.14.2 记录](kotlin-tv/RELEASE_0.14.2-local.md)。同签名覆盖安装保留本机记录；安装仍需系统确认。本仓库未配置云端正式签名发布。
+电视版 **0.14.13-local / versionCode 28** 加入红果扫码登录和观看进度同步，保留播放修复和自动更新。APK 沿用本地 debug 签名，包名 `com.hongguotv.nativeapp`。公开下载及自动更新以[本仓库最新 Release](https://github.com/seanshigit/hongguoTV-livingroom/releases/latest)的 `update.json` 为准，安装及验证见 [本版记录](kotlin-tv/RELEASE_0.14.13-local.md)。同签名覆盖安装保留本机记录；安装仍需系统确认。本仓库未配置云端正式签名发布。
 
-0.14 通过111项核心测试、Android构建与Lint（0 errors、33 warnings）；Android TV API36模拟器完成漫剧/真人短剧共4次官方预加载换集、同源交接、暂停恢复、后台释放与低内存取消。结束到下一集首帧样本为149–197毫秒，不是旧版同条件对照。自动更新完整验收见[0.12记录](kotlin-tv/RELEASE_0.12.0-local.md)，频道/搜索/大字号验收见[0.11记录](kotlin-tv/RELEASE_0.11.0-local.md)。**本轮按用户要求仅本地测试；实体电视、Android8实机及全站/全剧播放尚未验收。**
+既往预加载验收和测试时延见 [0.13 记录](kotlin-tv/RELEASE_0.13.0-local.md)，自动更新设计见 [0.12 记录](kotlin-tv/RELEASE_0.12.0-local.md)。账号同步的真实手机与 Android TV 模拟器验收范围见本版记录；实体电视、Android 8 实机及全部片源未逐一验收。
 
 ## 构建
 

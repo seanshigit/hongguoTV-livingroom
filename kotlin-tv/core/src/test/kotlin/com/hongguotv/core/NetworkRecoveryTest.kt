@@ -90,4 +90,54 @@ class NetworkRecoveryTest {
             }
         } finally { server.stop(0);http.connectionPool.evictAll();http.dispatcher.executorService.shutdownNow() }
     }
+
+    @Test fun prepareMovesToTheNextStreamCandidateWhenTheFirstAddressFails() {
+        fun box(type:String,body:ByteArray)=be32(body.size+8)+type.toByteArray()+body
+        val bytes=box("ftyp","isom0000".toByteArray())+box("moov",byteArrayOf())+ByteArray(1024) { it.toByte() }
+        val server=HttpServer.create(InetSocketAddress("127.0.0.1",0),0)
+        server.createContext("/bad") { exchange -> exchange.sendResponseHeaders(502,0); exchange.close() }
+        server.createContext("/good") { exchange ->
+            val range=exchange.requestHeaders.getFirst("Range").removePrefix("bytes=").split('-').map(String::toInt)
+            val end=minOf(range[1],bytes.lastIndex); val body=bytes.copyOfRange(range[0],end+1)
+            exchange.responseHeaders.add("Content-Range","bytes ${range[0]}-$end/${bytes.size}")
+            exchange.sendResponseHeaders(206,body.size.toLong()); exchange.responseBody.use { it.write(body) }
+        }
+        server.start(); val http=OkHttpClient()
+        try {
+            val remote=RemoteVideo(http,StreamInfo("http://127.0.0.1:${server.address.port}/bad",null,"720P",
+                listOf(StreamCandidate("http://127.0.0.1:${server.address.port}/good",null,"720P"))))
+            remote.prepare(); assertTrue(remote.info.url.endsWith("/good")); assertEquals(1024+24,remote.total)
+            remote.close()
+        } finally { server.stop(0);http.connectionPool.evictAll();http.dispatcher.executorService.shutdownNow() }
+    }
+
+    @Test fun midStreamFailureSwitchesCandidateAndPreservesRequestedRange() {
+        fun box(type:String,body:ByteArray)=be32(body.size+8)+type.toByteArray()+body
+        val bytes=box("ftyp","isom0000".toByteArray())+box("moov",byteArrayOf())+ByteArray(512*1024) { (it%239).toByte() }
+        val requests=java.util.Collections.synchronizedList(mutableListOf<String>())
+        val server=HttpServer.create(InetSocketAddress("127.0.0.1",0),0)
+        fun serve(exchange: com.sun.net.httpserver.HttpExchange, failAfterHeader: Boolean) {
+            val range=exchange.requestHeaders.getFirst("Range")
+            requests += "${exchange.httpContext.path}:$range"
+            if(failAfterHeader && !range.startsWith("bytes=0-")) {
+                exchange.sendResponseHeaders(502,0); exchange.close(); return
+            }
+            val (start,end)=range.removePrefix("bytes=").split('-').map(String::toInt)
+            val last=minOf(end,bytes.lastIndex); val body=bytes.copyOfRange(start,last+1)
+            exchange.responseHeaders.add("Content-Range","bytes $start-$last/${bytes.size}")
+            exchange.sendResponseHeaders(206,body.size.toLong()); exchange.responseBody.use { it.write(body) }
+        }
+        server.createContext("/primary") { exchange -> serve(exchange,true) }
+        server.createContext("/backup") { exchange -> serve(exchange,false) }
+        server.start(); val http=OkHttpClient.Builder().retryOnConnectionFailure(false).build()
+        try {
+            RemoteVideo(http,StreamInfo("http://127.0.0.1:${server.address.port}/primary",null,"720P",
+                listOf(StreamCandidate("http://127.0.0.1:${server.address.port}/backup",null,"720P")))).use { video ->
+                video.prepare()
+                assertArrayEquals(bytes.copyOfRange(300000,300128),video.read(300000,128))
+                assertTrue(video.info.url.endsWith("/backup"))
+                assertTrue(requests.any { it.startsWith("/backup:bytes=300000-300127") })
+            }
+        } finally { server.stop(0);http.connectionPool.evictAll();http.dispatcher.executorService.shutdownNow() }
+    }
 }

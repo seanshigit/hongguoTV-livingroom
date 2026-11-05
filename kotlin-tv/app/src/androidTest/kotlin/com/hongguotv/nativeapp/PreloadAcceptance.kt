@@ -23,7 +23,8 @@ import java.io.File
 class PreloadAcceptance: Instrumentation() {
     private lateinit var activity: Activity
     private val report=StringBuilder()
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var playbackSmoke=false
+    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); playbackSmoke=arguments?.getString("scope")=="playback-smoke"; start() }
     private fun views(view: View): List<View> = listOf(view)+(if(view is ViewGroup) (0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList())
     private fun all()=views(activity.window.decorView)
     private fun <T> ui(action: ()->T): T {
@@ -63,6 +64,11 @@ class PreloadAcceptance: Instrumentation() {
                 await("detail") { all().filterIsInstance<TextView>().any { it.text.toString().startsWith("开始观看") || it.text.toString().startsWith("继续第") } }
                 ui { all().filterIsInstance<TextView>().first { it.isFocusable && (it.text.toString().startsWith("开始观看") || it.text.toString().startsWith("继续第")) }.performClick() }
                 await("real video") { all().filterIsInstance<PlayerView>().firstOrNull()?.player?.let { it.isPlaying && it.videoSize.width>0 && it.currentPosition>1000 }==true }
+                if(playbackSmoke) {
+                    report.append("PASS $type: actual video frames and playback after account integration\n")
+                    result=Activity.RESULT_OK
+                    break
+                }
                 val p=ui { player() }
                 val manager=ui { manager() } ?: error("Next episode never gets Media3 sample prebuffering; only raw-byte warm-up is available")
                 var completed: MediaItem?=null

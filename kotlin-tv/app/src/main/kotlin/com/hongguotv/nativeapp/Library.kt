@@ -13,6 +13,13 @@ import java.util.concurrent.TimeUnit
 // The backup and native library use the same immutable progress shape.
 typealias WatchProgress = BackupProgress
 
+interface AccountHistoryEvents {
+    fun checkpoint(progress: WatchProgress)
+    fun remove(id: String)
+    fun clear()
+    fun setWatched(id: String, value: Boolean)
+}
+
 /** Memory-only UI access; disk reads, JSON serialization and commits run on workers. */
 class Library(context: Context) {
     private companion object {
@@ -29,6 +36,8 @@ class Library(context: Context) {
     private val homeWrites = LatestWriteQueue<String, () -> Any?>("hongguotv-home-write", write = { batch -> commit(homePrefs, batch) },
         failed = { Log.w("HongguoTV", "Home cache commit failed") })
     private var index: LibraryIndex? = null
+    private var accountHistory: LibraryIndex? = null
+    private var accountEvents: AccountHistoryEvents? = null
     private val homes = mutableMapOf<ContentType, CatalogPage>()
     private val homeSavedAt = mutableMapOf<ContentType, Long>()
     private var loading = false
@@ -87,6 +96,12 @@ class Library(context: Context) {
         }
     }
     private fun state(): LibraryIndex = checkNotNull(index) { "Load the local library before accessing it" }
+    private fun historyState(): LibraryIndex = accountHistory ?: state()
+    fun useAccountHistory(history: List<WatchProgress>, watched: Set<String>, events: AccountHistoryEvents) {
+        accountHistory = LibraryIndex(BackupData(emptyList(), history, watched, emptyList(), state().settings), historyLimit = Int.MAX_VALUE)
+        accountEvents = events
+    }
+    fun useGuestHistory() { accountHistory = null; accountEvents = null }
     private fun put(key: String, value: Any?) { writes.submit(mapOf(key to { value })) }
     private fun persist(vararg keys: String) {
         val state = state()
@@ -110,10 +125,10 @@ class Library(context: Context) {
     fun favorite(id: String) = state().favorite(id)
     fun later() = state().later()
     fun queued(id: String) = state().queued(id)
-    fun history(): List<WatchProgress> = state().history()
-    fun progress(id: String): WatchProgress? = state().progress(id)
+    fun history(): List<WatchProgress> = historyState().history()
+    fun progress(id: String): WatchProgress? = historyState().progress(id)
     fun searches() = state().searches()
-    fun watched(id: String) = state().watched(id)
+    fun watched(id: String) = historyState().watched(id)
     fun hidden() = state().hidden()
     fun favoriteUpdate(id: String) = state().favoriteUpdate(id)
     fun updatedFavorites() = state().updatedFavorites()
@@ -122,14 +137,18 @@ class Library(context: Context) {
     } ?: "尚未检查更新"
     fun toggle(series: Series) = state().toggle(series).also { persist("favorites", "favoriteUpdates") }
     fun toggleLater(series: Series) = state().toggleLater(series).also { persist("later") }
-    fun save(progress: WatchProgress) { if (state().save(progress)) persist("progress") }
-    fun setWatched(id: String, value: Boolean) { if (state().setWatched(id, value)) persist("watched") }
+    fun save(progress: WatchProgress) {
+        if (historyState().save(progress)) accountEvents?.checkpoint(progress) ?: persist("progress")
+    }
+    fun setWatched(id: String, value: Boolean) {
+        if (historyState().setWatched(id, value)) accountEvents?.setWatched(id, value) ?: persist("watched")
+    }
     fun hide(id: String) { state().hide(id); persist("hidden") }
     fun unhideAll() { state().unhideAll(); persist("hidden") }
     fun rememberSearch(query: String, type: ContentType) { state().rememberSearch(query, type); persist("searches") }
     fun clearSearches() { state().clearSearches(); persist("searches") }
-    fun removeHistory(id: String) { state().removeHistory(id); persist("progress", "watched") }
-    fun clearHistory() { state().clearHistory(); persist("progress", "watched") }
+    fun removeHistory(id: String) { historyState().removeHistory(id); accountEvents?.remove(id) ?: persist("progress", "watched") }
+    fun clearHistory() { historyState().clearHistory(); accountEvents?.clear() ?: persist("progress", "watched") }
     fun observeFavorite(id: String, count: Int, now: Long, acknowledge: Boolean = false) {
         if (state().observeFavorite(id, count, now, acknowledge)) persist("favoriteUpdates")
     }
@@ -162,13 +181,23 @@ class Library(context: Context) {
     var frameMode: VideoFrameMode
         get() = state().settings.frame
         set(value) { if (value != frameMode) { state().settings = state().settings.copy(frame = value); put("frameMode", value.name) } }
+    var playbackCacheMb: Long
+        get() = state().settings.playbackCacheMb
+        set(value) {
+            val next = PlaybackCacheSize.normalize(value)
+            if (next != playbackCacheMb) {
+                state().settings = state().settings.copy(playbackCacheMb = next)
+                put("playbackCacheMb", next)
+            }
+        }
     fun snapshot() = state().snapshot()
     fun restore(incoming: BackupData, restoreSettings: Boolean) {
         val merged = LibraryBackup.merge(snapshot(), incoming, restoreSettings)
         index = LibraryIndex(merged, state().updates())
         persist("favorites", "later", "progress", "watched", "hidden", "searches", "favoriteUpdates")
         writes.submit(mapOf("quality" to { merged.settings.quality }, "playbackSpeed" to { merged.settings.speed },
-            "autoNext" to { merged.settings.autoNext }, "contentType" to { merged.settings.type.storedValue }, "frameMode" to { merged.settings.frame.name }))
+            "autoNext" to { merged.settings.autoNext }, "contentType" to { merged.settings.type.storedValue },
+            "frameMode" to { merged.settings.frame.name }, "playbackCacheMb" to { merged.settings.playbackCacheMb }))
         flush()
     }
     /** Requests prompt background commit, without lifecycle-thread disk waits. */
@@ -191,6 +220,7 @@ class Library(context: Context) {
                 null -> edit.remove(key)
                 is String -> edit.putString(key, value)
                 is Int -> edit.putInt(key, value)
+                is Long -> edit.putLong(key, value)
                 is Float -> edit.putFloat(key, value)
                 is Boolean -> edit.putBoolean(key, value)
                 is Set<*> -> edit.putStringSet(key, value.filterIsInstance<String>().toSet())
