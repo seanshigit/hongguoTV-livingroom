@@ -38,7 +38,7 @@ class ContentRepositoryTest {
         val error=assertThrows(IOException::class.java) { repo.stream("123") }
         assertTrue(error.message.orEmpty().contains("110001"))
     }
-    @Test fun playbackReusesOneRegisteredIdentityAcrossRequests() {
+    @Test fun playbackRegistersPerRequestWithoutRandomOrTruncatedIds() {
         val visitors=mutableListOf<Pair<String?,String?>>()
         var registrations=0
         val repo=ContentRepository(repositoryHttp { request ->
@@ -49,7 +49,7 @@ class ContentRepositoryTest {
             DeviceRegister.Registered("9007199254740993","9007199254741993")
         })
         repeat(2) { assertThrows(IOException::class.java) { repo.stream("123") } }
-        assertEquals(1,registrations)
+        assertEquals(2,registrations)
         assertEquals(visitors[0],visitors[1])
         assertTrue(visitors.all { (iid,device) -> iid=="9007199254741993" && device=="9007199254740993" })
     }
@@ -124,7 +124,7 @@ class ContentRepositoryTest {
         val repo=repository { request ->
             if(request.url.host.contains("fqnovel")) {
                 calls++
-                if(calls<3) "" else JSONObject().put("code",0).put("data",JSONObject().put("123",JSONObject().put("video_model",
+                if(calls<2) "" else JSONObject().put("code",0).put("data",JSONObject().put("123",JSONObject().put("video_model",
                     JSONObject().put("fallback_api","https://example.com/good")))).toString()
             } else {
                 val row=JSONObject().put("vheight",720).put("codec_type","h264").put("main_url","https://example.com/video")
@@ -132,7 +132,7 @@ class ContentRepositoryTest {
             }
         }
         assertEquals("https://example.com/video",repo.stream("123",720).url)
-        assertEquals(3,calls)
+        assertEquals(2,calls)
     }
 
     @Test fun streamRetriesAValidProviderResponseThatHasNoVideoResources() {

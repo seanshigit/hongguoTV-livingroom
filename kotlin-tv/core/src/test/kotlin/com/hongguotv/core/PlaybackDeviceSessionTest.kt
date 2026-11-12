@@ -23,7 +23,7 @@ class PlaybackDeviceSessionTest {
     }
 
     @Test
-    fun registersBeforePlaybackAndReusesIdentityAcrossRepositoriesAndRetries() {
+    fun registersBeforeEachPlaybackWithoutSendingCookiesToPlayer() {
         var registrations = 0
         var models = 0
         val requests = mutableListOf<okhttp3.Request>()
@@ -42,7 +42,7 @@ class PlaybackDeviceSessionTest {
                             requests += request
                             assertEquals("333", request.url.queryParameter("device_id"))
                             assertEquals("444", request.url.queryParameter("iid"))
-                            assertEquals("ttreq=test-only", request.header("Cookie"))
+                            assertNull(request.header("Cookie"))
                             if (++models == 1) "" else model
                         }
                     Response.Builder()
@@ -60,7 +60,7 @@ class PlaybackDeviceSessionTest {
         val session = PlaybackDeviceSession()
         ContentRepository(http, playbackSession = session).stream("123")
         ContentRepository(http, playbackSession = session).stream("123")
-        assertEquals(1, registrations)
+        assertEquals(3, registrations)
         assertEquals(3, models)
         assertEquals(1, requests.map { it.url.queryParameter("cdid") }.distinct().size)
     }

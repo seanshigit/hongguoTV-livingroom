@@ -24,6 +24,12 @@
 
 2026-11-03 播放请求与空响应恢复参考 jackotom/hongguo-drama 5.4 的 [`93e694e3f4ab`](https://github.com/jackotom/hongguo-drama/commit/93e694e3f4ab)：按实际请求签名，并在空响应时尝试备用官方主机及有限频率的匿名设备更新。仍使用本客户端的 Kotlin 签名实现。
 
+2026-11-13 播放协议更新参考：
+
+- jackotom/hongguo-drama [`v7.1`](https://github.com/jackotom/hongguo-drama/tree/bdab9d6158e07524f234f88c1168f20baa2cd507)，`src/native/app-source.js`、`playback-signature.js`：播放专用 Argus/Ladon 签名、当前 video-tab GET 接口、空响应时有界回退 gzip POST、逐次匿名播放身份及模型解析。搜索和账号继续使用原签名。
+- `PlayerSigner.kt` 精简移植自 N3urda/hongguoTV [`7444bb01`](https://github.com/N3urda/hongguoTV/tree/7444bb01aec7b0420740103e551c45f1f66101c9) 的 `Argus.kt`；原文件注明来源为 GPL-3.0-only 的 [ch6vip/fqapp](https://github.com/ch6vip/fqapp) `rust/src/sign/{argus,simon,ladon,protobuf}.rs`。仅保留播放所需编码和签名，不引入注册期旧 Gorgon 或解码调试功能。
+- 固定签名测试向量同源于上述 N3urda `PlayerSignTest.kt` 和 hongguo-drama `playback-signature.test.cjs`，不使用实现自签结果作为期望值。
+
 2026-10-17 对照 jackotom/hongguo-drama `v1.73` / [`84b6e88e65374942c123a53c7d6ad9e78bcd101b`](https://github.com/jackotom/hongguo-drama/tree/84b6e88e65374942c123a53c7d6ad9e78bcd101b)，播放接口实现相对上述版本未变化。参考其有限重试、取消与完整响应保护思路，为本客户端的内容及分段 GET 请求增加短退避；未引入桌面端运行时依赖。具体差异见 [核对记录](../docs/research/2026-10-17-upstream-iteration.md)。
 
 其他依赖：

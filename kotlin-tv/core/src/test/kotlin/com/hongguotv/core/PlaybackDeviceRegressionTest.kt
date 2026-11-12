@@ -29,7 +29,7 @@ class PlaybackDeviceRegressionTest {
                         .body("{\"code\":0,\"device_id\":\"9007199254740993\",\"install_id\":\"9007199254741993\"}".toResponseBody())
                         .build()
                 }
-                request.url.encodedPath == "/novel/player/multi_video_model/v1/" -> {
+                request.url.encodedPath == "/reading/bookapi/video_tab/multi_video_model/v1/" -> {
                     playbackDevice = request.url.queryParameter("device_id")
                     playbackInstall = request.url.queryParameter("iid")
                     Response.Builder()
@@ -68,11 +68,11 @@ class PlaybackDeviceRegressionTest {
             val request = chain.request()
             val body = if (request.url.host == "log5-applog-lf.fqnovel.com") {
                 "{\"code\":0,\"device_id\":\"12345\",\"install_id\":\"67890\"}"
-            } else if (request.url.encodedPath == "/novel/player/multi_video_model/v1/") {
+            } else if (request.url.encodedPath == "/reading/bookapi/video_tab/multi_video_model/v1/") {
                 JSONObject().put("code", 0).put("data", JSONObject().put("123", JSONObject().put("video_model", JSONObject()
                     .put("video_list", org.json.JSONArray().put(JSONObject()
                         .put("vheight", 720).put("vwidth", 1280).put("codec_type", "h264")
-                        .put("main_url", "https://example.com/video"))) ))).toString()
+                        .put("main_url", "https://example.com/video").put("encrypt_info",JSONObject().put("encrypt",false)))) ))).toString()
             } else error("unexpected request: ${request.url}")
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body.toResponseBody()).build()
         }.build()

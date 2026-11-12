@@ -398,31 +398,35 @@ class ContentRepository(
     private fun streamOnce(id: String, maxQuality: Int): StreamInfo {
         require(id.matches(Regex("[0-9]{1,30}")))
         val payload="""{"biz_param":{"detail_page_version":0,"device_level":3,"disable_digg_stat":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$id"]}}""".toByteArray()
-        var identity=playbackSession.profile(http)
-        var data: JSONObject?=null; var parseFailure: Throwable?=null; var emptyResponses=0
-        for(attempt in 0 until 3) {
+        var identity=playbackSession.freshProfile(http)
+        var data: JSONObject?=null
+        for(attempt in 0 until 2) {
             RequestScope.ensureActive()
-            val host=if(attempt==1) "api5-normal-hl.fqnovel.com" else "api5-normal-sinfonlineb.fqnovel.com"
-            val signed=playbackRequest(identity,payload,host)
+            val signed=playbackRequest(identity,payload,id,legacy=attempt==1)
             val response=text(signed.url,signed)
             if(response.isBlank()) {
-                parseFailure=IOException("播放接口返回为空")
-                if(++emptyResponses==2) identity=playbackSession.refresh(http,identity)
+                if(attempt==0) identity=playbackSession.freshProfile(http)
                 continue
             }
-            try { data=JSONObject(response); break } catch(e: org.json.JSONException) { parseFailure=e }
+            data=try { JSONObject(response) } catch(e: org.json.JSONException) { throw IOException("播放接口返回格式异常",e) }
+            break
         }
-        val result=data ?: throw IOException("播放接口返回了无法读取的数据，请稍后重试",parseFailure)
+        val result=data ?: throw IOException("播放接口返回为空，请稍后重试")
         val sourceCode=result.optInt("Code",result.optInt("code",0))
         if(sourceCode!=0) throw ProviderPlaybackException(sourceCode)
-        val map=result.optJSONObject("data") ?: throw IOException("播放信息为空")
+        val outer=result.optJSONObject("data") ?: throw IOException("播放信息为空")
+        val map=outer.optJSONObject("video_model_data") ?: outer
         val entry=map.optJSONObject(id) ?: throw IOException("片源未返回所选分集，请稍后重试")
         val model=when(val rawModel=entry.opt("video_model")) {
             is JSONObject -> rawModel
             is String -> runCatching { JSONObject(rawModel) }.getOrElse { throw IOException("播放模型格式异常",it) }
             else -> throw IOException("片源未返回所选分集，请稍后重试")
         }
-        val inlineRows=model.optJSONArray("video_list")?.objects().orEmpty()
+        val inlineRows=when(val list=model.opt("video_list")) {
+            is JSONArray -> list.objects()
+            is JSONObject -> list.keys().asSequence().mapNotNull { list.optJSONObject(it) }.toList()
+            else -> emptyList()
+        }
         val inline=inlineRows.isNotEmpty()
         val raw=model.opt("fallback_api")
         var info: JSONObject?=if(inline) {
@@ -483,7 +487,8 @@ class ContentRepository(
             val quality=if(row.first>0) "${row.first}P"+(if(row.first>maxQuality) "（兼容资源）" else "") else "自动"
             val encryption=item.optJSONObject("encrypt_info")
             val spade=item.str("spade_a").ifEmpty { encryption?.str("spade_a").orEmpty() }
-            if(inline && encryption!=null && encryption.opt("encrypt") !in listOf(false,0,"0","false") && spade.isEmpty()) return emptyList()
+            val encrypt=encryption?.opt("encrypt") ?: item.opt("encrypt")
+            if(inline && encrypt !in listOf(false,0,"0","false") && spade.isEmpty()) return emptyList()
             val key=spade.takeIf { it.isNotEmpty() }?.let(MediaCrypto::deriveKey)
             return candidateUrls(item).mapNotNull { raw ->
                 runCatching {
@@ -501,14 +506,26 @@ class ContentRepository(
         return StreamInfo(selected.candidate.url,selected.candidate.key,selected.candidate.quality,
             ordered.drop(1).map { it.candidate })
     }
-    private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray, host: String): Signer.Request {
-        val request=signer.sign("https://$host/novel/player/multi_video_model/v1/",identity.values,payload)
-        val headers=request.headers.toMutableMap()
-        headers["User-Agent"]="com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)"
-        headers["x-tt-store-region"]="cn"
-        headers["x-tt-store-region-src"]="did"
-        if(identity.cookie.isNotBlank()) headers["Cookie"]=identity.cookie
-        return request.copy(headers=headers)
+    private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray, id: String, legacy: Boolean): Signer.Request {
+        val now=clock(); val ts=now/1000
+        val version=if(legacy) "74332" else "73932"
+        val device=identity.values+mapOf("version_code" to version,"version_name" to (if(legacy) "7.4.3.32" else "7.3.9.32"),
+            "manifest_version_code" to version,"update_version_code" to version,"pv_player" to version)
+        val values=if(legacy) emptyMap() else linkedMapOf("video_id" to id,"video_id_type" to "0","device_level" to "1",
+            "need_all_video_definition" to "1","need_mp4_align" to "0","use_os_player" to "0","video_platform" to "1024","source" to "0","from_video_id" to "")
+        val query=Signer.encode(device+values+mapOf("ts" to ts.toString(),"_rticket" to now.toString()))
+        val body=if(legacy) java.io.ByteArrayOutputStream().also { out -> java.util.zip.GZIPOutputStream(out).use { it.write(payload) } }.toByteArray() else null
+        val headers=PlayerSigner.headers(query,body,ts).toMutableMap().apply {
+            put("User-Agent",VendorConstants.VIDEO_UA.replace("71332",version))
+            put("Accept","application/json; charset=utf-8,application/x-protobuf")
+            put("sdk-version","2"); put("x-xs-from-web","0"); put("x-ss-dp","8662")
+            put("passport-sdk-version",if(legacy) "5051452" else "50561")
+            put("x-tt-dt",""); put("x-tt-store-region","cn"); put("x-tt-store-region-src","did")
+            if(legacy) { put("Content-Encoding","gzip"); put("Content-Type","application/json; charset=UTF-8"); put("Connection","close") }
+            else put("x-tt-request-tag","t=0;n=0")
+        }
+        val path=if(legacy) "/novel/player/multi_video_model/v1/" else "/reading/bookapi/video_tab/multi_video_model/v1/"
+        return Signer.Request("https://api5-normal-sinfonlineb.fqnovel.com$path?$query",headers,body)
     }
     companion object {
         fun extractRouter(html: String): JSONObject {

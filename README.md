@@ -2,7 +2,7 @@
 
 面向 Android TV / 电视盒子的红果短剧与漫剧客户端，采用 **Kotlin 原生 View + Media3**。Android 8.0 起可用，安装 APK 后直接联网，无需部署 Node 或 Docker 服务。
 
-**已对照 `jackotom/hongguo-drama v2.2` 最新源码。** 2026-10-22 核对最新提交 [`34c960ae`](https://github.com/jackotom/hongguo-drama/commit/34c960aeaf88887cc3927d5ce3e78cd1320ff8f0)，相对 v1.73，播放请求与签名接口未变；电视版补入按真实短边分辨率判定画质的修正，保留已有有限重试、Media3 预加载及搜索补全。[电视版发布与验证记录](kotlin-tv/RELEASE_0.14.2-local.md)
+**TV 版 0.14.15-local 已对照 `jackotom/hongguo-drama v7.1` 更新播放协议。** 2026-11-13 核对稳定版提交 [`bdab9d61`](https://github.com/jackotom/hongguo-drama/commit/bdab9d6158e07524f234f88c1168f20baa2cd507)，修复旧播放请求返回 HTTP 200 空响应的问题：使用播放专用 Argus/Ladon 签名、当前 video-tab 接口及有界 gzip POST 回退，逐次注册匿名播放身份。保留搜索、账号同步和 Media3 预加载。[电视版发布与验证记录](kotlin-tv/RELEASE_0.14.15-local.md)
 
 [下载 APK 与源码](https://github.com/seanminjie-del/hongguoTV-livingroom/releases) · [原生工程与构建](kotlin-tv/README.md) · [预加载验证记录](kotlin-tv/RELEASE_0.13.0-local.md) · [第三方来源](kotlin-tv/NOTICE.md)
 
@@ -26,7 +26,7 @@
 
 ## 安装与验证
 
-电视版 **0.14.13-local / versionCode 28** 加入红果扫码登录和观看进度同步，保留播放修复和自动更新。APK 沿用本地 debug 签名，包名 `com.hongguotv.nativeapp`。公开下载及自动更新以[本仓库最新 Release](https://github.com/seanshigit/hongguoTV-livingroom/releases/latest)的 `update.json` 为准，安装及验证见 [本版记录](kotlin-tv/RELEASE_0.14.13-local.md)。同签名覆盖安装保留本机记录；安装仍需系统确认。本仓库未配置云端正式签名发布。
+电视版 **0.14.15-local / versionCode 30** 更新播放协议，保留红果扫码登录、观看进度同步和自动更新。APK 沿用本地 debug 签名，包名 `com.hongguotv.nativeapp`。公开下载及自动更新以[本仓库最新 Release](https://github.com/seanshigit/hongguoTV-livingroom/releases/latest)的 `update.json` 为准，安装及验证见 [本版记录](kotlin-tv/RELEASE_0.14.15-local.md)。同签名覆盖安装保留本机记录；安装仍需系统确认。本仓库未配置云端正式签名发布。
 
 既往预加载验收和测试时延见 [0.13 记录](kotlin-tv/RELEASE_0.13.0-local.md)，自动更新设计见 [0.12 记录](kotlin-tv/RELEASE_0.12.0-local.md)。账号同步的真实手机与 Android TV 模拟器验收范围见本版记录；实体电视、Android 8 实机及全部片源未逐一验收。
 

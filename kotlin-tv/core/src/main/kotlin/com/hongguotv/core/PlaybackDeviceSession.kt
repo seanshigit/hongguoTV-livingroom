@@ -67,6 +67,12 @@ class PlaybackDeviceSession(
         ready?.let {
             return it
         }
+        return freshProfile(http).also { ready = it }
+    }
+
+    // Playback identities may be consumed by one model request; account sessions keep profile().
+    @Synchronized
+    internal fun freshProfile(http: OkHttpClient): Profile {
         if (Thread.currentThread().isInterrupted) throw InterruptedIOException("播放请求已取消")
         val device =
             try {
@@ -94,6 +100,5 @@ class PlaybackDeviceSession(
                     .entries
                     .joinToString("; ") { (name, value) -> "$name=$value" },
             )
-            .also { ready = it }
     }
 }

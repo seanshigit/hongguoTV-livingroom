@@ -5,7 +5,6 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Buffer
 import java.io.IOException
 import org.junit.Assert.*
 import org.junit.Test
@@ -21,7 +20,7 @@ class PlaybackRequestRecoveryTest {
     }.build()
 
     @Test
-    fun playbackSignsTheActualBodyWithTheRegisteredIdentity() {
+    fun playbackSignsTheCurrentGetWithTheRegisteredIdentity() {
         lateinit var request: Request
         val result = ContentRepository(client { request = it; model }, playbackSession = session).stream("123")
         assertEquals("https://example.test/video", result.url)
@@ -30,31 +29,27 @@ class PlaybackRequestRecoveryTest {
         val timestamp = request.header("x-khronos")
         assertNotNull("playback needs its own signature", timestamp)
         assertEquals(timestamp, request.url.queryParameter("ts"))
-        assertEquals(request.url.queryParameter("_rticket"), request.header("x-ss-req-ticket"))
-        val buffer = Buffer()
-        request.body!!.writeTo(buffer)
-        val body = buffer.readByteArray()
-        assertEquals(digest("MD5", body).hex().uppercase(), request.header("x-ss-stub"))
-        val gorgon = request.header("x-gorgon")!!
-        val random = gorgon.substring(4, 6).toInt(16) or (gorgon.substring(6, 8).toInt(16) shl 8)
-        assertEquals(gorgon, Signer().gorgon(request.url.encodedQuery!!, body, timestamp!!.toInt(), random))
-        assertFalse(request.header("x-medusa").isNullOrBlank())
-        assertFalse(request.header("x-helios").isNullOrBlank())
+        assertEquals((timestamp!!.toLong()*1000).toString(), request.header("x-ss-req-ticket"))
+        assertNull(request.body)
+        assertNull(request.header("x-ss-stub"))
+        assertTrue(decode64(request.header("x-argus")!!).size>100)
+        assertTrue(decode64(request.header("x-ladon")!!).size>16)
     }
 
     @Test
-    fun emptyPrimaryResponseTriesTheAlternateOfficialHost() {
-        val hosts = mutableListOf<String>()
+    fun emptyPrimaryResponseTriesLegacyPathOnTheSameOfficialHost() {
+        val paths = mutableListOf<String>()
         val http = client { request ->
-            hosts += request.url.host
-            if (request.url.host == "api5-normal-hl.fqnovel.com") model else ""
+            assertEquals("api5-normal-sinfonlineb.fqnovel.com",request.url.host)
+            paths += request.url.encodedPath
+            if (request.method == "POST") model else ""
         }
         assertEquals("https://example.test/video", ContentRepository(http, playbackSession = session).stream("123").url)
-        assertEquals(listOf("api5-normal-sinfonlineb.fqnovel.com", "api5-normal-hl.fqnovel.com"), hosts)
+        assertEquals(listOf("/reading/bookapi/video_tab/multi_video_model/v1/", "/novel/player/multi_video_model/v1/"), paths)
     }
 
     @Test
-    fun repeatedEmptyResponsesRenewTheDeviceOnceAndBoundFurtherRenewals() {
+    fun repeatedEmptyResponsesAllowOnlyOneFallbackPerPlayback() {
         var registrations = 0
         var allowRenewed = true
         val session = PlaybackDeviceSession {
@@ -70,10 +65,11 @@ class PlaybackRequestRecoveryTest {
         }
         val repository = ContentRepository(http, playbackSession = session)
         assertEquals("https://example.test/video", repository.stream("123").url)
-        assertEquals(listOf("333", "333", "555"), requestedDevices)
+        assertEquals(listOf("333", "555"), requestedDevices)
         assertEquals(2, registrations)
         allowRenewed = false
         assertThrows(IOException::class.java) { repository.stream("123") }
-        assertEquals("renewals must be rate limited", 2, registrations)
+        assertEquals("at most two registrations and requests per playback", 4, registrations)
+        assertEquals(4, requestedDevices.size)
     }
 }
