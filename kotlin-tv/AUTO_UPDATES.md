@@ -100,7 +100,9 @@ https://raw.githubusercontent.com/seanshigit/hongguoTV-livingroom/updates/playba
 
 已公开的同 tag 附件只核验复用，不会覆盖。失败后可以从相同候选重试；尚未通过公开下载核对的候选不会被写进客户端清单。源码和发布说明以真正的构建来源为准，而非放置 APK 的分支。
 
-后续版本先完成固定签名构建与源码测试，再通过 PR 更新候选常量和指定发布分支，校验通过后创建完整发布分支。不能把上游任意提交、临时 Debug 签名或未经验证的 APK 自动推入此渠道。此流程需要仓库已有的 GitHub Actions 与 Contents 发布权限；如果权限或分支保护拒绝操作，应保留已完成产物并报告阻塞，不改变保护规则。
+后续版本先完成固定签名构建与源码测试，再通过 PR 更新 Python 脚本中的候选常量，校验通过后创建该版本对应的完整发布分支。工作流只接收本仓库 `release/playbackfix-*` 分支，并在获得发布步骤的令牌前核对分支必须等于固定候选版本；普通版本发布无需修改工作流文件。
+
+保持工作流稳定也确保实际构建来源相对默认分支不新增或修改工作流文件：GitHub 对这种差异要求额外的 Workflows 写权限，而 Actions 的 `GITHUB_TOKEN` 不能获得该权限。不得为了发布成功更换 APK 的来源提交或绕过拒绝。不能把上游任意提交、临时 Debug 签名或未经验证的 APK 自动推入此渠道。此流程需要仓库已有的 GitHub Actions 与 Contents 发布权限；如果权限或分支保护拒绝操作，应保留已完成产物并报告阻塞，不改变保护规则。
 
 `distribution/release.yml` 和 `distribution/publish-tv-update.py` 仍是旧发布模板，包含旧版本、旧证书及旧脚本路径，不能用于以上任一渠道。
 
