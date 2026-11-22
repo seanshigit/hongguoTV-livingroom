@@ -51,6 +51,8 @@ class MainActivity: Activity() {
     private var cachePrefetchHttp: okhttp3.OkHttpClient?=null
     private var playbackHttp: okhttp3.OkHttpClient?=null
     private val preparedNext=PreparedSlot<RemoteVideo>({ android.os.SystemClock.elapsedRealtime() })
+    private data class PreloadOwner(val key: String,val ticket: Long)
+    private var prefetchMediaItem: MediaItem?=null
     private var prefetchJob: java.util.concurrent.Future<*>?=null
     private var cachePrefetchJob: java.util.concurrent.Future<*>?=null
     private var prefetchScope: RequestScope?=null
@@ -920,7 +922,7 @@ class MainActivity: Activity() {
         library.setWatched(data.series.id,false)
         val selectedIndex=index.coerceIn(0,data.episodes.lastIndex)
         val prefetched=if(position==0L && !recovering) preparedNext.take("${data.episodes[selectedIndex]}:${library.maxQuality}") else null
-        val prefetchedSource=if(prefetched!=null) preloadManager?.getMediaSource(videoItem(data.episodes[selectedIndex])) else null
+        val prefetchedSource=if(reuse && prefetched!=null) prefetchMediaItem?.let { preloadManager?.getMediaSource(it) } else null
         val claimedHttp=if(prefetched!=null) prefetchHttp.also { prefetchHttp=null } else null
         saveProgress(); library.flush(); invalidatePage(); favoriteMonitor.stop(); releaseCatalogViews()
         if(reuse) {
@@ -977,9 +979,13 @@ class MainActivity: Activity() {
                             android.util.Log.i("HongguoTV","Media3 next episode samples buffered id=${mediaItem.mediaId}")
                         }
                         override fun onError(exception: PreloadException) {
-                            // A speculative failure must not interrupt the current episode.
-                            if(exception.mediaItem.mediaId!=player?.currentMediaItem?.mediaId) remove(exception.mediaItem)
-                            android.util.Log.w("HongguoTV","Media3 preload failed; next episode will use normal preparation")
+                            // Removing the MediaSource alone leaves a failed RemoteVideo claimable.
+                            // Revision ownership also rejects errors posted after handoff or retry.
+                            val owner=exception.mediaItem.localConfiguration?.tag as? PreloadOwner
+                            if(owner!=null && preparedNext.invalidate(owner.ticket,owner.key)) {
+                                cancelPrefetch()
+                                android.util.Log.w("HongguoTV","Media3 preload failed; discarded preparation and transport for episode=${exception.mediaItem.mediaId}")
+                            }
                         }
                     })
                 }
@@ -1000,7 +1006,7 @@ class MainActivity: Activity() {
                             return
                         }
                         playbackReady=true
-                        if(firstReady) preloadManager?.remove(videoItem(requestedId))
+                        if(firstReady) p.currentMediaItem?.let { preloadManager?.remove(it) }
                         if(firstReady) { firstReady=false; readySince=android.os.SystemClock.elapsedRealtime(); android.util.Log.i("HongguoTV","Playback ready episode=${episodeIndex+1} preloaded=${prefetched!=null} reused=$reuse elapsedMs=${readySince-playbackStarted}") }
                         if(hud.visibility==View.VISIBLE) updatePlaybackText()
                     }
@@ -1030,7 +1036,9 @@ class MainActivity: Activity() {
     }
     private fun playbackCacheKey(id: String,quality: Int)="$id:$quality"
     private fun videoItem(id: String)=MediaItem.Builder().setMediaId(id).setUri("hongguotv://episode/$id").setMimeType(MimeTypes.VIDEO_MP4).build()
-    private fun videoSource(remote: RemoteVideo,id: String)=ProgressiveMediaSource.Factory { VideoDataSource(remote) }.createMediaSource(videoItem(id))
+    private fun preloadItem(id: String,key: String,ticket: Long)=videoItem(id).buildUpon().setTag(PreloadOwner(key,ticket)).build()
+    private fun videoSource(remote: RemoteVideo,id: String)=videoSource(remote,videoItem(id))
+    private fun videoSource(remote: RemoteVideo,item: MediaItem)=ProgressiveMediaSource.Factory { VideoDataSource(remote) }.createMediaSource(item)
     private fun closeTransport(http: okhttp3.OkHttpClient?) {
         if(http==null) return
         // Closing an idle TLS connection can write close_notify; keep it off the UI thread.
@@ -1083,7 +1091,7 @@ class MainActivity: Activity() {
         if(!keepMediaSource) preloadManager?.reset()
         prefetchScope?.cancel(); prefetchScope=null
         preparedNext.clear(); prefetchJob?.cancel(true); prefetchJob=null
-        closeTransport(prefetchHttp); prefetchHttp=null; prefetchedFor=""
+        closeTransport(prefetchHttp); prefetchHttp=null; prefetchedFor=""; prefetchMediaItem=null
     }
     private fun maybePrefetch() {
         maybeCacheAhead()
@@ -1108,9 +1116,11 @@ class MainActivity: Activity() {
                     RemoteVideo(http,source.stream(id,quality),playbackCache,playbackCacheKey(id,quality)).also { remote=it; it.warm() }
                 }
                 if(preparedNext.complete(ticket,key,prepared)) main.post {
-                    if(foreground && generation==playbackTicket && player===p && prefetchedFor==key && preparedNext.isFresh(key)) {
+                    if(foreground && generation==playbackTicket && player===p && prefetchedFor==key && preparedNext.isFresh(ticket,key)) {
                         preloadManager?.apply {
-                            add(videoSource(prepared,id),episodeIndex+1)
+                            val item=preloadItem(id,key,ticket)
+                            prefetchMediaItem=item
+                            add(videoSource(prepared,item),episodeIndex+1)
                             setCurrentPlayingIndex(episodeIndex)
                             invalidate()
                         }

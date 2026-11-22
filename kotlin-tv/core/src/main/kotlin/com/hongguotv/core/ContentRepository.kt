@@ -2,6 +2,7 @@
 package com.hongguotv.core
 
 import okhttp3.OkHttpClient
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,6 +28,7 @@ data class StreamInfo(val url: String, val key: ByteArray?, val quality: String,
 }
 class SearchSessionExpiredException: IOException("搜索结果已过期，请从第 1 页重新搜索")
 class ProviderPlaybackException(val sourceCode: Int): IOException("片源暂不可播放（错误 $sourceCode）")
+private class IncompatiblePlaybackCodecException: IOException("片源仅提供电视暂不支持的视频编码")
 private class EmptySearchResponseException: IOException("搜索接口未返回内容")
 internal const val MAX_CATALOG_PAGES = 1000
 
@@ -401,6 +403,7 @@ class ContentRepository(
         val payload="""{"biz_param":{"detail_page_version":0,"device_level":3,"disable_digg_stat":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$id"]}}""".toByteArray()
         var identity=playbackSession.freshProfile(http)
         var data: JSONObject?=null
+        var fromCurrentEndpoint=false
         for(attempt in 0 until 2) {
             RequestScope.ensureActive()
             val signed=playbackRequest(identity,payload,id,legacy=attempt==1)
@@ -410,23 +413,67 @@ class ContentRepository(
                 continue
             }
             data=try { JSONObject(response) } catch(e: org.json.JSONException) { throw IOException("播放接口返回格式异常",e) }
+            fromCurrentEndpoint=attempt==0
             break
         }
         val result=data ?: throw IOException("播放接口返回为空，请稍后重试")
+        val model=playbackModel(result,id)
+        return try { streamFromModel(model,maxQuality) } catch(error: IncompatiblePlaybackCodecException) {
+            if(!fromCurrentEndpoint) throw error
+            // The GET succeeded but only advertised ByteVC2. Negotiate this same episode once
+            // through the current player protocol, retaining the registered anonymous identity.
+            // Empty responses, provider refusals and invalid keys/models do not enter this path.
+            compatiblePlayback(identity,id,maxQuality)
+        }
+    }
+    private fun playbackModel(result: JSONObject, id: String, grouped: Boolean=false): JSONObject {
         val sourceCode=result.optInt("Code",result.optInt("code",0))
         if(sourceCode!=0) throw ProviderPlaybackException(sourceCode)
         val outer=result.optJSONObject("data") ?: throw IOException("播放信息为空")
-        val map=outer.optJSONObject("video_model_data") ?: outer
+        val map=(if(grouped) outer.optJSONObject("1004") else null) ?: outer.optJSONObject("video_model_data") ?: outer
         val entry=map.optJSONObject(id) ?: throw IOException("片源未返回所选分集，请稍后重试")
-        val model=when(val rawModel=entry.opt("video_model")) {
+        return when(val rawModel=entry.opt("video_model")) {
             is JSONObject -> rawModel
             is String -> runCatching { JSONObject(rawModel) }.getOrElse { throw IOException("播放模型格式异常",it) }
             else -> throw IOException("片源未返回所选分集，请稍后重试")
         }
-        val inlineRows=when(val list=model.opt("video_list")) {
+    }
+    private fun compatiblePlayback(identity: PlaybackDeviceSession.Profile, id: String, maxQuality: Int): StreamInfo {
+        RequestScope.ensureActive()
+        // Payload and profile from N3urda/hongguoTV ac3a1e2 MobilePlayback.ladder.
+        val payload="""{"biz_param":{"detail_page_version":0,"device_level":1,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$id"]},"dr_scene":"player"}""".toByteArray(Charsets.UTF_8)
+        val compressed=java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.GZIPOutputStream(out).use { it.write(payload) }
+        }.toByteArray()
+        val signed=playbackSigner.signPost(
+            "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/player/v1",
+            playbackProfile(identity),compressed,
+        ).let { it.copy(headers=it.headers+mapOf(
+            "User-Agent" to "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)",
+            "Accept" to "application/json", "Content-Encoding" to "gzip",
+        )) }
+        val response=text(signed.url,signed)
+        if(response.isBlank()) throw IOException("兼容播放接口返回为空，请稍后重试")
+        val result=try { JSONObject(response) } catch(error: org.json.JSONException) { throw IOException("兼容播放接口返回格式异常",error) }
+        val model=playbackModel(result,id,grouped=true)
+        return try { streamFromModel(model,maxQuality) } catch(error: IOException) {
+            RequestScope.ensureActive()
+            // This compatibility request is bounded to one POST. Do not enter stream()'s
+            // historical retry for missing legacy resources, or register another identity.
+            throw IOException("兼容接口仍未提供电视可播放的清晰度，请稍后重试或选择其他剧集",error)
+        }
+    }
+    private fun streamFromModel(model: JSONObject, maxQuality: Int): StreamInfo {
+        val inlineList=model.opt("video_list")
+        val inlineRows=when(val list=inlineList) {
             is JSONArray -> list.objects()
             is JSONObject -> list.keys().asSequence().mapNotNull { list.optJSONObject(it) }.toList()
             else -> emptyList()
+        }
+        val completeInline=inlineRows.size==when(inlineList) {
+            is JSONArray -> inlineList.length()
+            is JSONObject -> inlineList.length()
+            else -> 0
         }
         val inline=inlineRows.isNotEmpty()
         val raw=model.opt("fallback_api")
@@ -453,10 +500,17 @@ class ContentRepository(
         val videoList=videoInfo.optJSONObject("video_list") ?: throw IOException("没有可用清晰度")
         // ByteVC2 resources can expose playable audio but no video track in Android's MP4 extractor.
         // Keep missing legacy codec labels usable, but never select a known incompatible variant.
-        val rows=videoList.keys().asSequence().mapNotNull { k -> videoList.optJSONObject(k)?.let { k to it } }.filter {
-            val codec=it.second.str("codec_type").ifEmpty { it.second.optJSONObject("video_meta")?.str("codec_type").orEmpty() }
-            it.second.str("main_url").isNotEmpty() && codec.lowercase() !in setOf("bytevc2","bvc2")
-        }.map { (k,o) ->
+        val entries=videoList.keys().asSequence().mapNotNull { k -> videoList.optJSONObject(k)?.let { k to it } }.toList()
+        fun incompatible(item: JSONObject): Boolean {
+            val codec=listOf(item.str("codec_type"),item.str("gear_des_key"),item.optJSONObject("video_meta")?.str("codec_type").orEmpty()).joinToString(" ").lowercase()
+            return codec.contains("bytevc2") || Regex("(^|[^a-z0-9])bvc2([^a-z0-9]|$)").containsMatchIn(codec)
+        }
+        val compatible=entries.filterNot { incompatible(it.second) }
+        val byteVc2Only=entries.isNotEmpty() && compatible.isEmpty() && entries.size==videoList.length() &&
+            (!inline || completeInline) && entries.all { it.second.str("main_url").isNotEmpty() }
+        // Validate the same URL/key requirements before classifying an otherwise usable
+        // model as codec-incompatible. Invalid metadata alone must not start another request.
+        val rows=(if(byteVc2Only) entries else compatible).filter { it.second.str("main_url").isNotEmpty() }.map { (k,o) ->
             val dimensions=listOfNotNull(o,o.optJSONObject("video_meta")).flatMap { meta ->
                 listOf(meta.optInt("vwidth") to meta.optInt("vheight"),meta.optInt("width") to meta.optInt("height"))
             }.firstOrNull { (width,height) -> width>0 && height>0 }
@@ -490,12 +544,13 @@ class ContentRepository(
             val spade=item.str("spade_a").ifEmpty { encryption?.str("spade_a").orEmpty() }
             val encrypt=encryption?.opt("encrypt") ?: item.opt("encrypt")
             if(inline && encrypt !in listOf(false,0,"0","false") && spade.isEmpty()) return emptyList()
-            val key=spade.takeIf { it.isNotEmpty() }?.let(MediaCrypto::deriveKey)
+            val key=try { spade.takeIf { it.isNotEmpty() }?.let(MediaCrypto::deriveKey) }
+                catch(error: IllegalArgumentException) { throw IOException("内容密钥格式异常",error) }
             return candidateUrls(item).mapNotNull { raw ->
                 runCatching {
                     var url=raw
                     if(seed.isNotEmpty()) url=MediaCrypto.decryptUrl(url,decode64(seed))
-                    if(!url.startsWith("https://") && !url.startsWith("http://")) return@runCatching null
+                    if(url.toHttpUrlOrNull()==null) return@runCatching null
                     Variant(row.first,StreamCandidate(url,key,quality))
                 }.getOrNull()
             }
@@ -504,20 +559,23 @@ class ContentRepository(
         val seenUrls=mutableSetOf<String>()
         val ordered=orderedRows.flatMap(::variants).filter { seenUrls.add(it.candidate.url) }
         val selected=ordered.firstOrNull() ?: throw IOException("没有电视可播放的清晰度，请稍后再试或选择其他剧集")
+        if(byteVc2Only) throw IncompatiblePlaybackCodecException()
         return StreamInfo(selected.candidate.url,selected.candidate.key,selected.candidate.quality,
             ordered.drop(1).map { it.candidate })
     }
+    private fun playbackProfile(identity: PlaybackDeviceSession.Profile) = linkedMapOf(
+        "aid" to "8662", "app_name" to "novelread",
+        "version_code" to "74332", "version_name" to "7.4.3.32",
+        "channel" to "vivo_8662_64", "device_platform" to "android",
+        "device_type" to "PGT-AN10", "os_version" to "12", "update_version_code" to "74332",
+        "iid" to identity.values.getValue("iid"), "cdid" to identity.values.getValue("cdid"),
+        "device_id" to identity.values.getValue("device_id"),
+    )
     private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray, id: String, legacy: Boolean): Signer.Request {
         if (!legacy) {
             // video_tab uses the V5 player protocol. Its GET signs MD5(empty bytes),
             // and the signer returns the final query after selecting its request ticket.
-            val values = linkedMapOf(
-                "aid" to "8662", "app_name" to "novelread",
-                "version_code" to "74332", "version_name" to "7.4.3.32",
-                "channel" to "vivo_8662_64", "device_platform" to "android",
-                "device_type" to "PGT-AN10", "os_version" to "12", "update_version_code" to "74332",
-                "iid" to identity.values.getValue("iid"), "cdid" to identity.values.getValue("cdid"),
-                "device_id" to identity.values.getValue("device_id"),
+            val values = playbackProfile(identity) + linkedMapOf(
                 "video_id" to id, "video_id_type" to "0", "device_level" to "1",
                 "need_all_video_definition" to "1", "need_mp4_align" to "0", "use_os_player" to "0",
                 "video_platform" to "1024", "source" to "0", "from_video_id" to "",

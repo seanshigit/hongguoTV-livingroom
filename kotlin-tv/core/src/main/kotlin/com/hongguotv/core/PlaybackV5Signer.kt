@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// V5 GET playback signing adapted from N3urda/hongguoTV:
+// V5 playback signing adapted from N3urda/hongguoTV:
 // 18c37c2afd0567520135abcae312352542f09083 (Signer.kt, AesV3.kt, V5Constants.kt).
 // Empty-body GET behavior follows jackotom/hongguo-drama 92df757ed7be8ea658ee274a6a429b77f49e54e8,
 // also integrated by N3urda/hongguoTV 1782dda (MobilePlayback.videoTabRequest).
@@ -189,9 +189,9 @@ internal class PlaybackV5Signer(
         return encoded.map { it.toByte() }.toByteArray()
     }
 
-    private fun medusa(url: String, ts: Int, who: Map<String, String>): String {
+    private fun medusa(url: String, bodyHash: ByteArray, ts: Int, who: Map<String, String>): String {
         val query = sm3(url.substringAfter('?').toByteArray(Charsets.UTF_8))
-        val f13 = hashF13(query, digest("MD5", ByteArray(0)), ts)
+        val f13 = hashF13(query, bodyHash, ts)
         val flags = ByteArray(8)
         val version = who.getValue("version_name")
         val deviceInfo = proto(
@@ -263,7 +263,33 @@ internal class PlaybackV5Signer(
     }
 
     /** Sign the final query once, using MD5(empty bytes), and send no GET body or POST headers. */
-    fun signGet(base: String, values: Map<String, String>, now: Long = clock()): Signer.Request {
+    fun signGet(base: String, values: Map<String, String>, now: Long = clock()): Signer.Request =
+        sign(base, values, null, now)
+
+    /** The caller compresses once; these exact bytes are signed and returned for transmission. */
+    fun signPost(base: String, values: Map<String, String>, body: ByteArray, now: Long = clock()): Signer.Request {
+        val compressed = body.copyOf()
+        require(compressed.size in 18..2 * 1024 * 1024) { "Invalid playback gzip body" }
+        try {
+            java.util.zip.GZIPInputStream(compressed.inputStream()).use { input ->
+                val buffer = ByteArray(8192)
+                var size = 0
+                while (true) {
+                    RequestScope.ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    size += count
+                    require(size <= 2 * 1024 * 1024) { "Playback body is too large" }
+                }
+            }
+        } catch (error: java.io.IOException) {
+            RequestScope.ensureActive()
+            throw IllegalArgumentException("Invalid playback gzip body", error)
+        }
+        return sign(base, values, compressed, now)
+    }
+
+    private fun sign(base: String, values: Map<String, String>, body: ByteArray?, now: Long): Signer.Request {
         val uri = runCatching { URI(base) }.getOrNull()
         require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() &&
             uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
@@ -282,17 +308,20 @@ internal class PlaybackV5Signer(
         }
         require(who["aid"] == null || who["aid"] == "8662") { "Invalid playback application" }
         val ts = (now / 1000).toInt()
+        val bodyHash = digest("MD5", body ?: ByteArray(0))
         if ("ts" in who) who["ts"] = ts.toString()
         for (offset in 0 until 1024) {
             RequestScope.ensureActive()
             val query = Signer.encode(who + ("_rticket" to (now + offset).toString()))
-            if (branch(query, ts) != 12) continue
+            if ((iv(sm3(query.toByteArray(Charsets.UTF_8)), bodyHash, ts) and 15) != 12) continue
             val url = "$base?$query"
-            return Signer.Request(url, linkedMapOf(
+            val headers = linkedMapOf(
                 "x-khronos" to ts.toString(),
                 "x-helios" to helios(ts),
-                "x-medusa" to medusa(url, ts, who),
-            ), null)
+                "x-medusa" to medusa(url, bodyHash, ts, who),
+            )
+            if (body != null) headers["x-ss-stub"] = bodyHash.hex().uppercase()
+            return Signer.Request(url, headers, body)
         }
         throw java.io.IOException("无法生成播放签名")
     }
