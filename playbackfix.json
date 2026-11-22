@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "packageName": "com.hongguotv.nativeapp.playbackfix",
+  "versionCode": 33,
+  "versionName": "0.14.18-playbackfix",
+  "minSdk": 26,
+  "tag": "tv-v0.14.18-playbackfix",
+  "sourceCommit": "823eb97916f3878cd3402e0e006d8cce909114dd",
+  "sourceTree": "6e8f4aa8be6bb39f829ec2eb5e31ac0c6bfffea1",
+  "apk": {
+    "name": "hongguotv-0.14.18-playbackfix-android8.apk",
+    "size": 9540418,
+    "sha256": "3983497cf74adf58832c41f6f58844b79496b4f3be47cd81e5722c8755a8eb10"
+  },
+  "notes": "连播修复版：清理失败的下一集预加载资源，并为仅 ByteVC2 的分集追加一次有界兼容取流。独立 playbackfix 包名、签名和更新渠道；已安装修复版可同签名覆盖。原版不能直接覆盖，需手动安装并迁移记录。233 项核心测试和真实兼容回退已有验证；实体电视长时间连播未验收。本次只发布既有 APK，不重新构建或签名。"
+}
