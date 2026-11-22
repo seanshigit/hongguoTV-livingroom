@@ -9,6 +9,12 @@ import subprocess
 import sys
 
 
+CHANNEL_PACKAGES = {
+    'legacy': 'com.hongguotv.nativeapp',
+    'playbackfix': 'com.hongguotv.nativeapp.playbackfix',
+}
+
+
 def metadata(apk, tools):
     signature = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
     signers = sorted(re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})', signature))
@@ -23,19 +29,24 @@ def metadata(apk, tools):
     return name, int(code), version, int(sdk[1]), signers
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--channel', choices=CHANNEL_PACKAGES, default='legacy',
+                        help='Update channel; legacy remains the default. Playbackfix uses its own manifest, not Releases latest.')
     parser.add_argument('--apk', type=Path, required=True)
     parser.add_argument('--previous-apk', type=Path, required=True)
     parser.add_argument('--build-tools', type=Path, required=True)
     parser.add_argument('--tag', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--notes-file', type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     name, code, version, sdk, signers = metadata(args.apk, args.build_tools)
     old_name, old_code, _, _, old_signers = metadata(args.previous_apk, args.build_tools)
-    if name != 'com.hongguotv.nativeapp' or old_name != name or signers != old_signers:
-        raise ValueError('Package name or APK signing certificate differs from previous release')
+    expected_package = CHANNEL_PACKAGES[args.channel]
+    if name != expected_package or old_name != name:
+        raise ValueError(f'APK package name does not match {args.channel} channel ({expected_package}) and previous release')
+    if signers != old_signers:
+        raise ValueError('APK signing certificate differs from previous release')
     if not old_code < code <= 2147483647:
         raise ValueError('versionCode must increase from previous release')
     if not re.fullmatch(r'[0-9][0-9A-Za-z.+-]{0,63}', version) or args.tag != f'tv-v{version}':
@@ -55,7 +66,9 @@ def main():
                 'notes': notes}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
-    print(f'Prepared {args.output}: {version}, versionCode {code}, same signer as previous APK')
+    print(f'Prepared {args.output}: {version}, versionCode {code}, channel {args.channel}, same signer as previous APK')
+    if args.channel == 'playbackfix':
+        print('Publish the Release with latest=false, then update only updates:playbackfix.json; leave the legacy manifest and mirror unchanged.')
 
 
 if __name__ == '__main__':

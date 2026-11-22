@@ -18,6 +18,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.FileProvider
 import com.hongguotv.core.AppUpdate
+import com.hongguotv.core.AppUpdateChannel
 import com.hongguotv.core.AppUpdateRepository
 import com.hongguotv.core.UpdateFiles
 import java.io.File
@@ -29,7 +30,8 @@ import java.util.concurrent.Future
 class AppUpdater(private val activity: Activity, private val idle: () -> Boolean) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
-    private val repository = AppUpdateRepository()
+    private val channel = AppUpdateChannel.forPackageName(activity.packageName)
+    private val repository = AppUpdateRepository(channel)
     private val preferences = activity.getSharedPreferences("app_updates", Activity.MODE_PRIVATE)
     private val apk = File(activity.cacheDir, "updates/update.apk")
     private var task: Future<*>? = null
@@ -48,8 +50,8 @@ class AppUpdater(private val activity: Activity, private val idle: () -> Boolean
     private var promptedCode = 0L
     private val auto get() = preferences.getBoolean("automatic", true)
     init {
-        if (preferences.getString("channel", null) != AppUpdate.REPOSITORY) {
-            preferences.edit().putString("channel", AppUpdate.REPOSITORY)
+        if (preferences.getString("channel", null) != channel.preferenceId) {
+            preferences.edit().putString("channel", channel.preferenceId)
                 .remove("last_attempt").remove("deferred_code").remove("deferred_until").apply()
         }
     }
@@ -71,7 +73,7 @@ class AppUpdater(private val activity: Activity, private val idle: () -> Boolean
     }
     fun resume() {
         active = true; main.removeCallbacks(poll)
-        if (!BuildConfig.SIDE_BY_SIDE) main.postDelayed(poll, 8000)
+        main.postDelayed(poll, 8000)
         if (permissionRequested) {
             permissionRequested = false
             if (activity.packageManager.canRequestPackageInstalls()) install()
@@ -103,19 +105,6 @@ class AppUpdater(private val activity: Activity, private val idle: () -> Boolean
         if (!active) return
         anchor = from
         dialog?.dismiss()
-        if (BuildConfig.SIDE_BY_SIDE) {
-            val next = AlertDialog.Builder(activity)
-                .setTitle("播放修复版 · ${BuildConfig.VERSION_NAME}")
-                .setMessage("此版本与原版独立安装。收藏和观看记录可通过「设置 → 手机备份与恢复」迁移。\n\n后续请安装本修复版的更新包；原版自动更新渠道不适用于此版本。")
-                .setPositiveButton("关闭", null).create()
-            dialog = next
-            next.setOnDismissListener {
-                if (dialog === next) dialog = null
-                if (from?.isAttachedToWindow == true) from.requestFocus()
-            }
-            next.show()
-            return
-        }
         val dp = activity.resources.displayMetrics.density
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding((24*dp).toInt(), (12*dp).toInt(), (24*dp).toInt(), 0) }
         statusView = TextView(activity).apply { text = status; textSize = 17f; setTextColor(TvStyle.text) }

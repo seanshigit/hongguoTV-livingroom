@@ -3,8 +3,13 @@ import java.util.Properties
 plugins { id("com.android.application"); kotlin("android") }
 val signingProperties = Properties().apply { val config = rootProject.file("keystore.properties"); if (config.exists()) config.inputStream().use { load(it) } }
 fun signingValue(env: String, key: String): String? = System.getenv(env) ?: signingProperties.getProperty(key)
-// Optional repair build can be installed alongside a locally signed older release.
+// The repair package has its own update channel and must keep its original signing key.
 val sideBySide = providers.gradleProperty("hongguotv.sideBySide").orNull == "true"
+if (sideBySide) {
+    require(!signingValue("HONGGUOTV_KEYSTORE", "storeFile").isNullOrBlank()) {
+        "Playback-fix builds require the retained signing key via HONGGUOTV_KEYSTORE or keystore.properties."
+    }
+}
 
 android {
     namespace = "com.hongguotv.nativeapp"
@@ -14,8 +19,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = System.getenv("HONGGUOTV_TEST_RUNNER") ?: "com.hongguotv.nativeapp.TvAcceptance"
-        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: 31
-        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: if (sideBySide) "0.14.16-playbackfix" else "0.14.16-local"
+        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: if (sideBySide) 32 else 31
+        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: if (sideBySide) "0.14.17-playbackfix" else "0.14.16-local"
         manifestPlaceholders["appLabel"] = if (sideBySide) "红果 TV 播放修复版" else "红果 TV 原生版"
         buildConfigField("boolean", "SIDE_BY_SIDE", sideBySide.toString())
     }
@@ -28,7 +33,10 @@ android {
             keyPassword = signingValue("HONGGUOTV_KEY_PASSWORD", "keyPassword")
         }
     }
-    buildTypes { getByName("release") { signingConfig = signingConfigs.getByName("delivery"); isMinifyEnabled = true; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
+    buildTypes {
+        if (sideBySide) getByName("debug") { signingConfig = signingConfigs.getByName("delivery") }
+        getByName("release") { signingConfig = signingConfigs.getByName("delivery"); isMinifyEnabled = true; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += setOf("META-INF/versions/**", "META-INF/*.kotlin_module") }
