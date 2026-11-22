@@ -1048,7 +1048,7 @@ class MainActivity: Activity() {
         if(cachePrefetchJob?.isDone==false) return
         val data=detail ?: return; if(episodeIndex !in data.episodes.indices || remote.total<=0L) return
         val key=playbackCacheKey(data.episodes[episodeIndex],library.maxQuality)
-        val start=playbackCache.contiguousEnd(key)
+        val start=remote.cachedPrefixEnd()
         if(start==0L && p.currentPosition<2_500L) return
         if(start>=remote.total) return
         val end=minOf(remote.total,start+8L*1024*1024)

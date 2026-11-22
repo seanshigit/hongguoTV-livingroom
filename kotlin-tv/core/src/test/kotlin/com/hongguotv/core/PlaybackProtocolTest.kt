@@ -22,17 +22,30 @@ class PlaybackProtocolTest {
     }.build()
     private fun session() = PlaybackDeviceSession { DeviceRegister.Registered("333", "444") }
 
-    @Test fun usesCurrentVideoTabGetAndFullPlaybackSignatures() {
+    @Test fun usesCurrentVideoTabGetWithV5PlaybackSignatures() {
         val http = client { request ->
             assertEquals("GET", request.method)
             assertEquals("/reading/bookapi/video_tab/multi_video_model/v1/", request.url.encodedPath)
             assertEquals("123", request.url.queryParameter("video_id"))
-            assertEquals("73932", request.url.queryParameter("version_code"))
+            assertEquals("74332", request.url.queryParameter("version_code"))
+            assertEquals("7.4.3.32", request.url.queryParameter("version_name"))
+            assertEquals("vivo_8662_64", request.url.queryParameter("channel"))
+            assertEquals("PGT-AN10", request.url.queryParameter("device_type"))
+            assertEquals("12", request.url.queryParameter("os_version"))
             assertEquals("333", request.url.queryParameter("device_id"))
-            assertTrue(decode64(request.header("x-argus")!!).size > 100)
-            assertTrue(decode64(request.header("x-ladon")!!).size > 16)
-            assertNull(request.header("x-medusa"))
+            assertEquals("444", request.url.queryParameter("iid"))
+            assertTrue(request.header("User-Agent")!!.startsWith("com.phoenix.read/73932 "))
+            val timestamp = request.header("x-khronos")!!.toInt()
+            val medusa = decode64(request.header("x-medusa")!!)
+            assertEquals("v5 wire prefix", 5, medusa.i32(0, true) xor timestamp)
+            assertTrue(medusa.size > 100)
+            assertTrue(decode64(request.header("x-helios")!!).size > 16)
+            assertNull(request.header("x-argus"))
+            assertNull(request.header("x-ladon"))
             assertNull(request.header("x-gorgon"))
+            assertNull(request.header("x-ss-stub"))
+            assertNull(request.header("Content-Encoding"))
+            assertNull(request.header("Content-Type"))
             assertNull(request.body)
             model
         }
@@ -47,6 +60,10 @@ class PlaybackProtocolTest {
                 assertEquals("/novel/player/multi_video_model/v1/", request.url.encodedPath)
                 assertEquals("74332", request.url.queryParameter("version_code"))
                 assertEquals("gzip", request.header("Content-Encoding"))
+                assertTrue(decode64(request.header("x-argus")!!).size > 100)
+                assertTrue(decode64(request.header("x-ladon")!!).size > 16)
+                assertNull(request.header("x-medusa"))
+                assertNull(request.header("x-helios"))
                 val compressed = Buffer().also { request.body!!.writeTo(it) }.readByteArray()
                 assertEquals(digest("MD5", compressed).hex(), request.header("x-ss-stub"))
                 val json = GZIPInputStream(ByteArrayInputStream(compressed)).use { JSONObject(String(it.readBytes(), Charsets.UTF_8)) }
@@ -56,6 +73,17 @@ class PlaybackProtocolTest {
         }
         assertEquals("https://example.test/video", ContentRepository(http, playbackSession = session()).stream("123").url)
         assertEquals(listOf("GET", "POST"), requests.map { it.method })
+    }
+
+    @Test fun providerRejectionIsNotRetriedWithAnotherIdentityOrProtocol() {
+        var requests = 0
+        var registrations = 0
+        val session = PlaybackDeviceSession { registrations++; DeviceRegister.Registered("333", "444") }
+        val repository = ContentRepository(client { requests++; """{"code":403,"message":"not available"}""" }, playbackSession = session)
+        val failure = assertThrows(ProviderPlaybackException::class.java) { repository.stream("123") }
+        assertEquals(403, failure.sourceCode)
+        assertEquals(1, requests)
+        assertEquals(1, registrations)
     }
 
     @Test fun eachEpisodeGetsANewAnonymousPlaybackIdentity() {

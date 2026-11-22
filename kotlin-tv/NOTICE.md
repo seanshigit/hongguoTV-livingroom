@@ -30,6 +30,14 @@
 - `PlayerSigner.kt` 精简移植自 N3urda/hongguoTV [`7444bb01`](https://github.com/N3urda/hongguoTV/tree/7444bb01aec7b0420740103e551c45f1f66101c9) 的 `Argus.kt`；原文件注明来源为 GPL-3.0-only 的 [ch6vip/fqapp](https://github.com/ch6vip/fqapp) `rust/src/sign/{argus,simon,ladon,protobuf}.rs`。仅保留播放所需编码和签名，不引入注册期旧 Gorgon 或解码调试功能。
 - 固定签名测试向量同源于上述 N3urda `PlayerSignTest.kt` 和 hongguo-drama `playback-signature.test.cjs`，不使用实现自签结果作为期望值。
 
+2026-11-22 播放 V5 GET 协议修复参考：
+
+- N3urda/hongguoTV [`18c37c2afd0567520135abcae312352542f09083`](https://github.com/N3urda/hongguoTV/tree/18c37c2afd0567520135abcae312352542f09083)，`Signer.kt`、`AesV3.kt`、`V5Constants.kt`：V5 摘要、签名封装和协议专用 carrier。新增独立 `PlaybackV5Signer.kt`，不改变搜索、账号与旧 POST 的签名实现。上述文件到核对的 `ac3a1e2e866b2a917651575ba507adfe62344932` 未变化。
+- jackotom/hongguo-drama [`92df757ed7be8ea658ee274a6a429b77f49e54e8`](https://github.com/jackotom/hongguo-drama/tree/92df757ed7be8ea658ee274a6a429b77f49e54e8)，`src/native/playback-v5.js`、`app-source.js`：当前 video-tab GET 的设备参数、三个 V5 请求头、最终查询串及空字节正文摘要。Kotlin GET 集成同时核对 N3urda/hongguoTV `1782dda` 的 `MobilePlayback.videoTabRequest`。
+- `signing-v5-f13.json`、`signing-v5-carrier.json` 保留上述固定 Kotlin 提交的独立测试向量；`playback-v5-get.json` 由固定 JS 提交配合合成设备身份和固定随机数生成，覆盖完整 GET 请求。夹具不包含真实账号、设备身份或签名媒体地址。
+- 以上移植继续使用 GPL-3.0-only；APK 不包含参考 SDK、Node 运行时或 JavaScript 引擎。
+- 新增缓存回归的两段 AVC MP4 为本项目用 FFmpeg 生成的纯色测试样本，生成参数和用途见 `core/src/test/resources/media/README.md`。
+
 2026-10-17 对照 jackotom/hongguo-drama `v1.73` / [`84b6e88e65374942c123a53c7d6ad9e78bcd101b`](https://github.com/jackotom/hongguo-drama/tree/84b6e88e65374942c123a53c7d6ad9e78bcd101b)，播放接口实现相对上述版本未变化。参考其有限重试、取消与完整响应保护思路，为本客户端的内容及分段 GET 请求增加短退避；未引入桌面端运行时依赖。具体差异见 [核对记录](../docs/research/2026-10-17-upstream-iteration.md)。
 
 其他依赖：

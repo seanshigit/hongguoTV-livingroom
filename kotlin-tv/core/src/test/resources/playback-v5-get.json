@@ -1,0 +1,92 @@
+{
+  "source": "jackotom/hongguo-drama 92df757ed7be8ea658ee274a6a429b77f49e54e8 src/native/playback-v5.js",
+  "synthetic": true,
+  "base": "https://example.test/reading/bookapi/video_tab/multi_video_model/v1/",
+  "values": {
+    "aid": "8662",
+    "app_name": "novelread",
+    "version_code": "74332",
+    "version_name": "7.4.3.32",
+    "channel": "vivo_8662_64",
+    "device_platform": "android",
+    "device_type": "PGT-AN10",
+    "os_version": "12",
+    "update_version_code": "74332",
+    "iid": "9007199254741993",
+    "cdid": "00000000-0000-4000-8000-000000000001",
+    "device_id": "9007199254740993",
+    "video_id": "7704577082471014042",
+    "video_id_type": "0",
+    "device_level": "1",
+    "need_all_video_definition": "1",
+    "need_mp4_align": "0",
+    "use_os_player": "0",
+    "video_platform": "1024",
+    "source": "0",
+    "from_video_id": ""
+  },
+  "processStarted": 1800000000000,
+  "processNonce": "AQEBAQEBAQEBAQEBAQEBAQEB",
+  "random": 0.5,
+  "cases": [
+    {
+      "now": 1800000000000,
+      "url": "https://example.test/reading/bookapi/video_tab/multi_video_model/v1/?aid=8662&app_name=novelread&version_code=74332&version_name=7.4.3.32&channel=vivo_8662_64&device_platform=android&device_type=PGT-AN10&os_version=12&update_version_code=74332&iid=9007199254741993&cdid=00000000-0000-4000-8000-000000000001&device_id=9007199254740993&video_id=7704577082471014042&video_id_type=0&device_level=1&need_all_video_definition=1&need_mp4_align=0&use_os_player=0&video_platform=1024&source=0&from_video_id=&_rticket=1800000000009",
+      "headers": {
+        "x-khronos": "1800000000",
+        "x-helios": "AAAAgOldh6XkgPCcSOD+1hk6geYVwA9oX+NbtYeS3DNddvJe",
+        "x-medusa": "BdJJay2ZBqFJp0QoP2fnRyK/hT0AAAABE4oACACEAV8KGADNLP5LXOL7CqfYgSODDcgYHmzdpbzaWUKVoN5YI5XHIZH6OBG1b3L+SpGg+F4wqvPSRvpX7UcwZABU0hGx+UJpPm2+eBmON1ZjPWijvuWI9NBYaEsJCmL7/3wMS+FJDHeK1SHKjDVNKEO4+DCMpUz/3IG7XmTmyLANtQASHwaWEab0KGwbD1bltVsMgZsALWGQWk4bQEvZ2cTpAhNf9/W0acxnWRh28/EYVxe0SWMvTp7DrotNrYYUVVXuaS1LkhErcUIvlGmlo1WqTtcMLTkOK4HxrcgGYxiNNvijpqXNIB7xLYJUsCfUZsrSXHdF6sY7KrLNacWSC2q3Es/s5waFgnKsh3DD2y+EzFOa+R0F6dp9LJgQ1zPlhIpmw4GtXvfpRUlecsjfplhfiH7lSbenKbEVJ6H9I9Dz+IynIXGOkXUShqCxHNSjxkwds4gVzFDmaUAqghVLKnmngEUpE8k0dwZnHuOjOessh3Y6/yR8dhdOFv85Qg55g5v1ArQxjj6WhTRChgKPRZEvMiAqi9X+rvQlPkYYj8hs0kaWCD5x7avDwQYbCvJrKUp2NVdTZwPSUveqNN+nhA1cx/SSc8nk//9/////f/8AgA=="
+      }
+    },
+    {
+      "now": 1800000001000,
+      "url": "https://example.test/reading/bookapi/video_tab/multi_video_model/v1/?aid=8662&app_name=novelread&version_code=74332&version_name=7.4.3.32&channel=vivo_8662_64&device_platform=android&device_type=PGT-AN10&os_version=12&update_version_code=74332&iid=9007199254741993&cdid=00000000-0000-4000-8000-000000000001&device_id=9007199254740993&video_id=7704577082471014042&video_id_type=0&device_level=1&need_all_video_definition=1&need_mp4_align=0&use_os_player=0&video_platform=1024&source=0&from_video_id=&_rticket=1800000001007",
+      "headers": {
+        "x-khronos": "1800000001",
+        "x-helios": "AAAAgP8cAFskZQCdtTN/xhkUFMsVwA9oX+NbtYeS3DNddvJe",
+        "x-medusa": "BNJJayyZBqFIp0QoPmfnRyO/hT0AAAABxIoAABCEgdsIGO4j9BJ0y5WTGFYhGXyRxqQSay2YTDKWzxH83Jq+VgkaWOmyQnrkfDmLp+3YHy0BWFZpeJIC7aJd7mfFd78hEuVyi+lPQ12DGTB6U+gdzVQ0oM4MPK0KrVToHRgJz8DFQaBgibU6m5y9FfNgcgzv2xPOZOVsNGjKX8Hv/eYOdPvMDX4G5RaRGMPmo7qpFj5gxAOMhKQCNlA76Oq5+hRd97W0adxj2Rp38/EQRxM0SWMvbp7TrotNrYY0XVXu6S1LkhEjYUIvlGilo126TtcMLXkOI5HxLcoHIziFJvijpKTNIB7hLQJWsCf0bsrWXHdF6sY7KrLNacWSC2q3Es/s5waFgnKsh3DD2y+EzFOa+R0F6dp9LJgQ1zPlhIpmw4GtXvfpRUlecsjfplhfiH7lSbenKbEVJ6H9I9Dz+IynIXGOkXUShqCxHNSjxkwds4gVzFDmaUAqghVLKnmngEUpE8k0dwZnHuOjOessh3Y6/yR8dhdOFv85Qg55g5v1ArQxjj6WhTRChgKPRZEvMiAqi9X+rvQlPkYYj8hs0kaWCD5x7avDwQYbCvJrKUp2NVdTZwPSUveqNN+nhA1cx/SSc8mC//9/////f/8AgA=="
+      }
+    },
+    {
+      "now": 1800000002000,
+      "url": "https://example.test/reading/bookapi/video_tab/multi_video_model/v1/?aid=8662&app_name=novelread&version_code=74332&version_name=7.4.3.32&channel=vivo_8662_64&device_platform=android&device_type=PGT-AN10&os_version=12&update_version_code=74332&iid=9007199254741993&cdid=00000000-0000-4000-8000-000000000001&device_id=9007199254740993&video_id=7704577082471014042&video_id_type=0&device_level=1&need_all_video_definition=1&need_mp4_align=0&use_os_player=0&video_platform=1024&source=0&from_video_id=&_rticket=1800000002008",
+      "headers": {
+        "x-khronos": "1800000002",
+        "x-helios": "AAAAgIYHv4VhpWqHAYV6IUj2ICoVwA9oX+NbtYeS3DNddvJe",
+        "x-medusa": "B9JJay+ZBqFLp0QoPWfnRyC/hT0AAAABnYoAAACAgZsMWGyBWBVQ6THe/WfTmWbF8nHwLsWkFQDfsxhpSSHOXlmQfEPr5jZijcCURwPPnUL8oExoWghEQ4UwpE42j4m4ido95a/X7dRl5RumDj7g3CHOIHVxCvE66W5eH+44aC5bQco7rUtxe1VbmPWNo2V3tOey2/SbmiZ+Vla6OVh4pJgI6Vb7OmnIRB6fE6gxrczkoC0fMvxW/OtQF8h7EpFf97W0adxnWRp3s/EYRxO0SWIvbp7TrotNrcY0VUXq6S1K0jErYUIvlmmlo126StcOLTkOK5H1rcoGYziFJvyjpqXNIBbxLQJWsWf0ZsrWXHVF6sY7KrLNacWSC2q3Es/s5waFgnKsh3DD2y+EzFOa+R0F6dp9LJgQ1zPlhIpmw4GtXvfpRUlecsjfplhfiH7lSbenKbEVJ6H9I9Dz+IynIXGOkXUShqCxHNSjxkwds4gVzFDmaUAqghVLKnmngEUpE8k0dwZnHuOjOessh3Y6/yR8dhdOFv85Qg55g5v1ArQxjj6WhTRChgKPRZEvMiAqi9X+rvQlPkYYj8hs0kaWCD5x7avDwQYbCvJrKUp2NVdTZwPSUveqNN+nhA1cx/SSc8k7//9/////f/8AgA=="
+      }
+    },
+    {
+      "now": 1800000003000,
+      "url": "https://example.test/reading/bookapi/video_tab/multi_video_model/v1/?aid=8662&app_name=novelread&version_code=74332&version_name=7.4.3.32&channel=vivo_8662_64&device_platform=android&device_type=PGT-AN10&os_version=12&update_version_code=74332&iid=9007199254741993&cdid=00000000-0000-4000-8000-000000000001&device_id=9007199254740993&video_id=7704577082471014042&video_id_type=0&device_level=1&need_all_video_definition=1&need_mp4_align=0&use_os_player=0&video_platform=1024&source=0&from_video_id=&_rticket=1800000003000",
+      "headers": {
+        "x-khronos": "1800000003",
+        "x-helios": "AAAAgJGyhLcwZ5NBbt3DXJ9OLy8VwA9oX+NbtYeS3DNddvJe",
+        "x-medusa": "BtJJay6ZBqFKp0QoPGfnRyG/hT0AAAAB6ooAAACEgSgAWP4z0z/etVBLM/Y5vXFZjTZvH4vpZcopzJn/XB/CMqcZ512GH4Q2/S+5fN0YWdE9VzEYbnmzTWdZCAQoLTIFrU5H+3U7TDPrNgO/fk7D1U784ASaxii2wrm/RV3XZvEmIT+9NHnZTIWAN+7WdCKYFpadudjQfFgz3XuU9yOedv+HAxoPvCE+AQP2Dc98DXXyQSHh4aBVjHckaMYoChJf9vW0YcxnWRp289EYRxc0SWJvbpbTrgtNrYYUXUXuaS1LkhEjYUIvlGjlg1WqTlcOLTkOI4H1rcoHIxiFJvyjpqXNAB7hKQJWsSfUbtrSXHVE6sY7KrLNacWSC2q3Es/s5waFgnKsh3DD2y+EzFOa+R0F6dp9LJgQ1zPlhIpmw4GtXvfpRUlecsjfplhfiH7lSbenKbEVJ6H9I9Dz+IynIXGOkXUShqCxHNSjxkwds4gVzFDmaUAqghVLKnmngEUpE8k0dwZnHuOjOessh3Y6/yR8dhdOFv85Qg55g5v1ArQxjj6WhTRChgKPRZEvMiAqi9X+rvQlPkYYj8hs0kaWCD5x7avDwQYbCvJrKUp2NVdTZwPSUveqNN+nhA1cx/SSc8lB//9/////f/8AgA=="
+      }
+    }
+  ],
+  "valueOrder": [
+    "aid",
+    "app_name",
+    "version_code",
+    "version_name",
+    "channel",
+    "device_platform",
+    "device_type",
+    "os_version",
+    "update_version_code",
+    "iid",
+    "cdid",
+    "device_id",
+    "video_id",
+    "video_id_type",
+    "device_level",
+    "need_all_video_definition",
+    "need_mp4_align",
+    "use_os_player",
+    "video_platform",
+    "source",
+    "from_video_id"
+  ]
+}

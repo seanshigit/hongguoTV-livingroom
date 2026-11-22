@@ -3,17 +3,21 @@ import java.util.Properties
 plugins { id("com.android.application"); kotlin("android") }
 val signingProperties = Properties().apply { val config = rootProject.file("keystore.properties"); if (config.exists()) config.inputStream().use { load(it) } }
 fun signingValue(env: String, key: String): String? = System.getenv(env) ?: signingProperties.getProperty(key)
+// Optional repair build can be installed alongside a locally signed older release.
+val sideBySide = providers.gradleProperty("hongguotv.sideBySide").orNull == "true"
 
 android {
     namespace = "com.hongguotv.nativeapp"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.hongguotv.nativeapp"
+        applicationId = if (sideBySide) "com.hongguotv.nativeapp.playbackfix" else "com.hongguotv.nativeapp"
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = System.getenv("HONGGUOTV_TEST_RUNNER") ?: "com.hongguotv.nativeapp.TvAcceptance"
-        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: 30
-        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: "0.14.15-local"
+        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: 31
+        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: if (sideBySide) "0.14.16-playbackfix" else "0.14.16-local"
+        manifestPlaceholders["appLabel"] = if (sideBySide) "红果 TV 播放修复版" else "红果 TV 原生版"
+        buildConfigField("boolean", "SIDE_BY_SIDE", sideBySide.toString())
     }
     buildFeatures { buildConfig = true }
     signingConfigs {

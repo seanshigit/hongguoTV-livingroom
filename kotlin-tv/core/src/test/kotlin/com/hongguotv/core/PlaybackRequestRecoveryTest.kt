@@ -28,12 +28,15 @@ class PlaybackRequestRecoveryTest {
         assertEquals("444", request.url.queryParameter("iid"))
         val timestamp = request.header("x-khronos")
         assertNotNull("playback needs its own signature", timestamp)
-        assertEquals(timestamp, request.url.queryParameter("ts"))
-        assertEquals((timestamp!!.toLong()*1000).toString(), request.header("x-ss-req-ticket"))
+        val ticket = request.url.queryParameter("_rticket")!!.toLong()
+        assertTrue(ticket >= timestamp!!.toLong() * 1000)
+        assertTrue(ticket < timestamp.toLong() * 1000 + 2024)
         assertNull(request.body)
         assertNull(request.header("x-ss-stub"))
-        assertTrue(decode64(request.header("x-argus")!!).size>100)
-        assertTrue(decode64(request.header("x-ladon")!!).size>16)
+        assertTrue(decode64(request.header("x-medusa")!!).size>100)
+        assertTrue(decode64(request.header("x-helios")!!).size>16)
+        assertNull(request.header("x-argus"))
+        assertNull(request.header("x-ladon"))
     }
 
     @Test
