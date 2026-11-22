@@ -36,6 +36,7 @@ class ContentRepository(
     private val playbackSession: PlaybackDeviceSession = PlaybackDeviceSession(),
 ) {
     private val signer = Signer()
+    private val playbackSigner = PlaybackV5Signer(clock)
     private val site = "https://hongguoduanju.com"
     private data class SearchCursor(val searchId: String, val passback: String, val offset: Int?, val updatedAt: Long)
     private val searchCursors=linkedMapOf<Triple<ContentType,String,Int>,SearchCursor>()
@@ -507,25 +508,43 @@ class ContentRepository(
             ordered.drop(1).map { it.candidate })
     }
     private fun playbackRequest(identity: PlaybackDeviceSession.Profile, payload: ByteArray, id: String, legacy: Boolean): Signer.Request {
+        if (!legacy) {
+            // video_tab uses the V5 player protocol. Its GET signs MD5(empty bytes),
+            // and the signer returns the final query after selecting its request ticket.
+            val values = linkedMapOf(
+                "aid" to "8662", "app_name" to "novelread",
+                "version_code" to "74332", "version_name" to "7.4.3.32",
+                "channel" to "vivo_8662_64", "device_platform" to "android",
+                "device_type" to "PGT-AN10", "os_version" to "12", "update_version_code" to "74332",
+                "iid" to identity.values.getValue("iid"), "cdid" to identity.values.getValue("cdid"),
+                "device_id" to identity.values.getValue("device_id"),
+                "video_id" to id, "video_id_type" to "0", "device_level" to "1",
+                "need_all_video_definition" to "1", "need_mp4_align" to "0", "use_os_player" to "0",
+                "video_platform" to "1024", "source" to "0", "from_video_id" to "",
+            )
+            val signed = playbackSigner.signGet(
+                "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/", values,
+            )
+            return signed.copy(headers = signed.headers + mapOf(
+                "User-Agent" to VendorConstants.VIDEO_UA.replace("71332", "73932"),
+                "Accept" to "application/json; charset=utf-8",
+            ))
+        }
         val now=clock(); val ts=now/1000
-        val version=if(legacy) "74332" else "73932"
-        val device=identity.values+mapOf("version_code" to version,"version_name" to (if(legacy) "7.4.3.32" else "7.3.9.32"),
+        val version="74332"
+        val device=identity.values+mapOf("version_code" to version,"version_name" to "7.4.3.32",
             "manifest_version_code" to version,"update_version_code" to version,"pv_player" to version)
-        val values=if(legacy) emptyMap() else linkedMapOf("video_id" to id,"video_id_type" to "0","device_level" to "1",
-            "need_all_video_definition" to "1","need_mp4_align" to "0","use_os_player" to "0","video_platform" to "1024","source" to "0","from_video_id" to "")
-        val query=Signer.encode(device+values+mapOf("ts" to ts.toString(),"_rticket" to now.toString()))
-        val body=if(legacy) java.io.ByteArrayOutputStream().also { out -> java.util.zip.GZIPOutputStream(out).use { it.write(payload) } }.toByteArray() else null
+        val query=Signer.encode(device+mapOf("ts" to ts.toString(),"_rticket" to now.toString()))
+        val body=java.io.ByteArrayOutputStream().also { out -> java.util.zip.GZIPOutputStream(out).use { it.write(payload) } }.toByteArray()
         val headers=PlayerSigner.headers(query,body,ts).toMutableMap().apply {
             put("User-Agent",VendorConstants.VIDEO_UA.replace("71332",version))
             put("Accept","application/json; charset=utf-8,application/x-protobuf")
             put("sdk-version","2"); put("x-xs-from-web","0"); put("x-ss-dp","8662")
-            put("passport-sdk-version",if(legacy) "5051452" else "50561")
+            put("passport-sdk-version","5051452")
             put("x-tt-dt",""); put("x-tt-store-region","cn"); put("x-tt-store-region-src","did")
-            if(legacy) { put("Content-Encoding","gzip"); put("Content-Type","application/json; charset=UTF-8"); put("Connection","close") }
-            else put("x-tt-request-tag","t=0;n=0")
+            put("Content-Encoding","gzip"); put("Content-Type","application/json; charset=UTF-8"); put("Connection","close")
         }
-        val path=if(legacy) "/novel/player/multi_video_model/v1/" else "/reading/bookapi/video_tab/multi_video_model/v1/"
-        return Signer.Request("https://api5-normal-sinfonlineb.fqnovel.com$path?$query",headers,body)
+        return Signer.Request("https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/?$query",headers,body)
     }
     companion object {
         fun extractRouter(html: String): JSONObject {

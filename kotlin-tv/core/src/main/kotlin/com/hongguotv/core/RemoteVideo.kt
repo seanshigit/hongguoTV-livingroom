@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.Closeable
 import java.io.IOException
+import java.security.MessageDigest
 
 /** One playback stream. No listening socket or local HTTP service. */
 class RemoteVideo(private val http: OkHttpClient, initialInfo: StreamInfo, private val cache: PlaybackCache? = null, private val cacheKey: String = ""): Closeable {
@@ -14,13 +15,24 @@ class RemoteVideo(private val http: OkHttpClient, initialInfo: StreamInfo, priva
     private val candidates=initialInfo.candidates()
     private var candidateIndex=0
     private var preparedState: MediaCrypto.Prepared?=null
+    private var resourceFingerprint: String?=null
+    @Volatile private var resolvedCacheKey: String?=null
     @Volatile var info: StreamInfo=initialInfo
         private set
     data class Range(val bytes: ByteArray,val total: Long)
     var total: Long=0; private set
     @Volatile private var prefix=byteArrayOf()
     private fun currentCandidate() = candidates[candidateIndex]
-    private fun resetPrepared() { preparedState=null; total=0; prefix=byteArrayOf() }
+    private fun resetPrepared() { preparedState=null; resolvedCacheKey=null; total=0; prefix=byteArrayOf() }
+    /** Prefix identity for one MP4 resource, not a checksum of the whole file. */
+    private fun fingerprint(prepared: MediaCrypto.Prepared): String {
+        val hash=MessageDigest.getInstance("SHA-256")
+        hash.update(le64(total))
+        hash.update(prepared.header)
+        hash.update(MediaCrypto.decrypt(prefix,0,currentCandidate().key,prepared))
+        return hash.digest().hex()
+    }
+    fun cachedPrefixEnd(): Long = resolvedCacheKey?.let { cache?.contiguousEnd(it) } ?: 0L
     private fun publishCandidate() {
         val candidate=currentCandidate()
         info=StreamInfo(candidate.url,candidate.key,candidate.quality,candidates.drop(candidateIndex+1))
@@ -59,7 +71,13 @@ class RemoteVideo(private val http: OkHttpClient, initialInfo: StreamInfo, priva
                 val header=if(end>first.bytes.size) first.bytes+range(first.bytes.size.toLong(),end-1L).bytes else first.bytes.copyOf(end)
                 val next=MediaCrypto.prepare(header,currentCandidate().key)
                 if(next.samples.any { it.end>total }) throw IOException("视频样本超出资源大小")
+                val nextFingerprint=fingerprint(next)
+                // The extractor already holds byte offsets from the original MP4.
+                // A different encoding needs a fresh player source and a time seek.
+                if(resourceFingerprint!=null && resourceFingerprint!=nextFingerprint) throw IOException("视频资源已变化，请重新获取播放地址")
+                resourceFingerprint=nextFingerprint
                 preparedState=next
+                resolvedCacheKey=cacheKey.takeIf { it.isNotBlank() }?.let { "$it:mp4-v1:$nextFingerprint" }
                 return this
             } catch(e: Exception) {
                 if(closed) throw IOException("播放请求已取消",e)
@@ -80,13 +98,14 @@ class RemoteVideo(private val http: OkHttpClient, initialInfo: StreamInfo, priva
     }
     private fun readCurrent(start: Long,length: Int): ByteArray {
         if(start>=total) return byteArrayOf()
-        if(cacheKey.isNotBlank()) cache?.read(cacheKey,start,length)?.let { return it }
+        val key=resolvedCacheKey
+        if(key!=null) cache?.read(key,start,length)?.let { return it }
         val cached=prefix; val end=minOf(total,start+length)
         val available=(minOf(end,cached.size.toLong())-start).coerceAtLeast(0).toInt()
         val first=if(available>0) cached.copyOfRange(start.toInt(),start.toInt()+available) else byteArrayOf()
         val raw=if(start+available<end) first+range(start+available,end-1).bytes else first
         return MediaCrypto.decrypt(raw,start,currentCandidate().key,preparedState ?: throw IOException("视频尚未准备完成")).also {
-            if(cacheKey.isNotBlank()) cache?.write(cacheKey,start,it)
+            if(key!=null) cache?.write(key,start,it)
         }
     }
     private fun canSwitchAfter(error: IOException): Boolean {
@@ -108,8 +127,8 @@ class RemoteVideo(private val http: OkHttpClient, initialInfo: StreamInfo, priva
                 if(!canSwitchAfter(error) || candidateIndex+1>=candidates.size) throw error
                 candidateIndex++
                 resetPrepared(); publishCandidate()
-                // Rebuild the header/index on the replacement CDN, then retry the
-                // exact original range so callers never receive duplicate bytes.
+                // Rebuild and match the resource on the replacement CDN before
+                // retrying the exact range. prepare() rejects different MP4s.
                 prepare()
             }
         }
