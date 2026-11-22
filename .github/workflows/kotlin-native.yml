@@ -22,6 +22,8 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Update manifest and mirror regression checks
+        run: python3 -m unittest discover -s kotlin-tv/distribution -p 'test_*update.py'
       - name: Unit tests, Android lint, and installable development APK
         run: ./kotlin-tv/gradlew -p kotlin-tv :core:test :app:lintDebug :app:assembleDebug --console=plain
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

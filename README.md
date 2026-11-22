@@ -4,7 +4,7 @@
 
 当前源码 **0.14.16-local** 修复再次出现的播放空响应：video-tab GET 更新为 V5 签名与对应设备参数，使用空字节正文摘要和最终签名查询串；保留有界旧 POST 回退、搜索、账号同步和 Media3 预加载。同时隔离不同 MP4 的播放缓存，防止切换备用资源时混用视频字节。[修复与验证记录](kotlin-tv/RELEASE_0.14.16-local.md)
 
-当前公开历史 Release `tv-v0.14.15-local` 不包含这次修复。原发布签名没有保存在仓库中；可用下面的构建命令生成与旧版并存的「红果 TV 播放修复版」，无需卸载旧版。
+当前原版公开 Release `tv-v0.14.15-local` 不包含这次播放修复。原发布签名没有保存在仓库中；「红果 TV 播放修复版」使用独立包名和保留的签名，可与旧版并存。`0.14.17-playbackfix` 恢复此前修复包误关闭的自动检查、下载和手动更新入口，使用独立更新清单。[更新恢复说明](kotlin-tv/RELEASE_0.14.17-playbackfix.md)
 
 [历史 APK 与源码](https://github.com/seanshigit/hongguoTV-livingroom/releases) · [原生工程与构建](kotlin-tv/README.md) · [预加载验证记录](kotlin-tv/RELEASE_0.13.0-local.md) · [第三方来源](kotlin-tv/NOTICE.md)
 
@@ -30,7 +30,9 @@
 
 修复源码的版本号为 `0.14.16-local` / versionCode `31`，正常构建包名为 `com.hongguotv.nativeapp`。覆盖旧版需要原签名；本仓库未保存该密钥，也未配置云端正式签名发布。本次未改写历史 Release 或自动更新清单。
 
-使用 `-Phongguotv.sideBySide=true` 构建的版本名为 `0.14.16-playbackfix`，包名为 `com.hongguotv.nativeapp.playbackfix`，可以与旧版并存。它独立保存本机数据，可通过两边「设置 → 手机备份与恢复」迁移收藏和观看记录；账号需要重新登录。并存版不连接原版自动更新渠道。
+使用 `-Phongguotv.sideBySide=true` 构建的版本名为 `0.14.17-playbackfix` / versionCode `32`，包名为 `com.hongguotv.nativeapp.playbackfix`。它独立保存本机数据，可通过两边「设置 → 手机备份与恢复」迁移收藏和观看记录；账号需要重新登录。已安装 `0.14.16-playbackfix` 的用户需要同签名手动覆盖一次，无需卸载，之后使用修复版自己的自动更新渠道。
+
+原版自动更新功能原本已经存在；目前缺少可覆盖原版的同签名修复 APK。修复版的清单和 Release 必须独立发布，不能替换原版 `latest/update.json`。源码合并、APK 构建和公开渠道发布是不同步骤，具体发布状态以 [更新说明](kotlin-tv/AUTO_UPDATES.md) 为准。
 
 既往预加载验收和测试时延见 [0.13 记录](kotlin-tv/RELEASE_0.13.0-local.md)，自动更新设计见 [0.12 记录](kotlin-tv/RELEASE_0.12.0-local.md)。账号同步的真实手机与 Android TV 模拟器验收范围见本版记录；实体电视、Android 8 实机及全部片源未逐一验收。
 
@@ -44,7 +46,7 @@
 
 APK 输出：`kotlin-tv/app/build/outputs/apk/debug/app-debug.apk`。
 
-缺少原签名时，构建可并存安装的修复 APK：
+构建修复版时必须提供该包已保留的签名，不能使用新机器自动生成的 Debug 密钥。通过环境变量 `HONGGUOTV_KEYSTORE`、`HONGGUOTV_STORE_PASSWORD`、`HONGGUOTV_KEY_ALIAS`、`HONGGUOTV_KEY_PASSWORD` 或私有 `kotlin-tv/keystore.properties` 配置后执行：
 
 ```bash
 ./kotlin-tv/gradlew -p kotlin-tv :core:test :app:assembleDebug :app:lintDebug -Phongguotv.sideBySide=true --console=plain

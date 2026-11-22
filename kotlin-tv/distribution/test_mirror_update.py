@@ -103,6 +103,17 @@ class MirrorUpdateTest(unittest.TestCase):
             sync(self.root, self.open)
         self.assertEqual(old, json.loads((self.root / 'update.json').read_text()))
 
+    def test_playbackfix_release_cannot_replace_the_legacy_mirror(self):
+        old = self.manifest(30, '0.14.15-local')
+        self.existing(old)
+        repair = self.manifest(32, '0.14.17-playbackfix')
+        repair['packageName'] = 'com.hongguotv.nativeapp.playbackfix'
+        self.remote(repair)
+        with self.assertRaisesRegex(ValueError, 'Invalid update manifest'):
+            sync(self.root, self.open)
+        self.assertEqual(old, json.loads((self.root / 'update.json').read_text()))
+        self.assertFalse((self.root / 'releases' / repair['tag']).exists())
+
     def test_redirect_to_untrusted_or_cleartext_host_is_blocked(self):
         redirect = TrustedRedirect()
         request = urllib.request.Request('https://github.com/test')
