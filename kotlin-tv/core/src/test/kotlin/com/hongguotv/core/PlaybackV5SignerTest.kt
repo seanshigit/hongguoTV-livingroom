@@ -87,6 +87,43 @@ class PlaybackV5SignerTest {
         }
     }
 
+    @Test fun matchesIndependentGzipPostEnvelopesAndReturnsTheExactSignedBody() {
+        // Generated with unmodified hongguo-drama 92df757, the same entropy as GET,
+        // and the fixed gzip bytes below. No Kotlin signature supplies expected values.
+        val fixture = JSONObject(resource("playback-v5-post.json"))
+        val params = parameters(fixture)
+        val snapshot = params.toMap()
+        val body = decode64(fixture.getString("bodyBase64"))
+        val started = fixture.getLong("processStarted")
+        val signer = PlaybackV5Signer({ started }, { fixture.getDouble("random") },
+            fixture.getString("processNonce"), started)
+        val cases = fixture.getJSONArray("cases")
+        assertEquals(4, cases.length())
+        for (i in 0 until cases.length()) {
+            val row = cases.getJSONObject(i)
+            val signed = signer.signPost(fixture.getString("base"), params, body, row.getLong("now"))
+            assertEquals("final signed POST query $i", row.getString("url"), signed.url)
+            assertEquals("full POST signature $i", values(row.getJSONObject("headers")), signed.headers)
+            assertEquals(setOf("x-khronos", "x-helios", "x-medusa", "x-ss-stub"), signed.headers.keys)
+            assertArrayEquals(body, signed.body)
+            assertEquals(digest("MD5", body).hex().uppercase(), signed.headers["x-ss-stub"])
+            assertNull(signed.url.toHttpUrl().queryParameter("ts"))
+            params.forEach { (key, value) -> assertEquals(value, signed.url.toHttpUrl().queryParameter(key)) }
+        }
+        assertEquals(snapshot, params)
+    }
+
+    @Test fun postSigningRejectsAPlainOrTruncatedBodyInsteadOfSigningDifferentBytes() {
+        val fixture = JSONObject(resource("playback-v5-post.json"))
+        val body = decode64(fixture.getString("bodyBase64"))
+        for (invalid in listOf(ByteArray(0), fixture.getString("uncompressedBody").toByteArray(), body.copyOf(body.size - 1))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                PlaybackV5Signer().signPost(fixture.getString("base"), parameters(fixture), invalid,
+                    fixture.getLong("processStarted"))
+            }
+        }
+    }
+
     @Test fun cancelledSigningStopsBeforeEmittingARequest() {
         val fixture = JSONObject(resource("playback-v5-get.json"))
         Thread.currentThread().interrupt()

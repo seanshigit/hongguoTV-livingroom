@@ -21,5 +21,12 @@ class PreparedSlot<T: Closeable>(private val clock: ()->Long,private val ttl: Lo
         return result
     }
     @Synchronized fun isFresh(next: String): Boolean = value!=null && key==next && clock()-readyAt in 0..ttl
+    @Synchronized fun isFresh(ticket: Long,next: String): Boolean = ticket==revision && isFresh(next)
+    /** A late failure may release only the preparation it belongs to, never a claimed/new result. */
+    @Synchronized fun invalidate(ticket: Long,next: String): Boolean {
+        if(ticket!=revision || key!=next) return false
+        clear()
+        return true
+    }
     @Synchronized fun clear() { revision++; value?.close(); value=null; key="" }
 }

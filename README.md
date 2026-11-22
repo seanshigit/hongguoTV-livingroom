@@ -2,7 +2,7 @@
 
 面向 Android TV / 电视盒子的红果短剧与漫剧客户端，采用 **Kotlin 原生 View + Media3**。Android 8.0 起可用，安装 APK 后直接联网，无需部署 Node 或 Docker 服务。
 
-当前源码 **0.14.16-local** 修复再次出现的播放空响应：video-tab GET 更新为 V5 签名与对应设备参数，使用空字节正文摘要和最终签名查询串；保留有界旧 POST 回退、搜索、账号同步和 Media3 预加载。同时隔离不同 MP4 的播放缓存，防止切换备用资源时混用视频字节。[修复与验证记录](kotlin-tv/RELEASE_0.14.16-local.md)
+当前源码 **0.14.18** 继续修复连播：清理下一集预加载失败后遗留的资源，按任务归属处理迟到回调；部分集数只返回 ByteVC2 时，尝试一次 V5 POST 获取电视兼容资源。保留 V5 GET 播放、不同 MP4 缓存隔离和自动更新恢复。[连播修复记录](kotlin-tv/RELEASE_0.14.18-playbackfix.md) · [此前播放修复](kotlin-tv/RELEASE_0.14.16-local.md)
 
 当前原版公开 Release `tv-v0.14.15-local` 不包含这次播放修复。原发布签名没有保存在仓库中；「红果 TV 播放修复版」使用独立包名和保留的签名，可与旧版并存。`0.14.17-playbackfix` 恢复此前修复包误关闭的自动检查、下载和手动更新入口，使用独立更新清单。[更新恢复说明](kotlin-tv/RELEASE_0.14.17-playbackfix.md)
 
@@ -28,9 +28,9 @@
 
 ## 安装与验证
 
-修复源码的版本号为 `0.14.16-local` / versionCode `31`，正常构建包名为 `com.hongguotv.nativeapp`。覆盖旧版需要原签名；本仓库未保存该密钥，也未配置云端正式签名发布。本次未改写历史 Release 或自动更新清单。
+修复源码的版本号为 `0.14.18-local` / versionCode `33`，正常构建包名为 `com.hongguotv.nativeapp`。覆盖旧版需要原签名；本仓库未保存该密钥，也未配置云端正式签名发布。本次未改写历史 Release 或自动更新清单。
 
-使用 `-Phongguotv.sideBySide=true` 构建的版本名为 `0.14.17-playbackfix` / versionCode `32`，包名为 `com.hongguotv.nativeapp.playbackfix`。它独立保存本机数据，可通过两边「设置 → 手机备份与恢复」迁移收藏和观看记录；账号需要重新登录。已安装 `0.14.16-playbackfix` 的用户需要同签名手动覆盖一次，无需卸载，之后使用修复版自己的自动更新渠道。
+使用 `-Phongguotv.sideBySide=true` 构建的版本名为 `0.14.18-playbackfix` / versionCode `33`，包名为 `com.hongguotv.nativeapp.playbackfix`。它独立保存本机数据，可通过两边「设置 → 手机备份与恢复」迁移收藏和观看记录；账号需要重新登录。已安装 `0.14.16-playbackfix` 的用户需要同签名手动覆盖一次，无需卸载，之后使用修复版自己的自动更新渠道。
 
 原版自动更新功能原本已经存在；目前缺少可覆盖原版的同签名修复 APK。修复版的清单和 Release 必须独立发布，不能替换原版 `latest/update.json`。源码合并、APK 构建和公开渠道发布是不同步骤，具体发布状态以 [更新说明](kotlin-tv/AUTO_UPDATES.md) 为准。
 

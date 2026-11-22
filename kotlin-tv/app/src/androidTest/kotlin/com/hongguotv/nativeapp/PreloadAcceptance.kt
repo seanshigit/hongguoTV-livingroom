@@ -12,11 +12,17 @@ import android.widget.TextView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import androidx.media3.exoplayer.source.preload.PreloadException
 import androidx.media3.exoplayer.source.preload.PreloadManagerListener
 import androidx.media3.exoplayer.source.preload.PreloadMediaSource
 import androidx.media3.ui.PlayerView
+import com.hongguotv.core.PreparedSlot
+import com.hongguotv.core.RemoteVideo
+import okhttp3.OkHttpClient
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /** Exercises the real decrypting source, official sample prebuffering and handoff on a TV. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -33,8 +39,8 @@ class PreloadAcceptance: Instrumentation() {
         failure?.let { throw it }
         @Suppress("UNCHECKED_CAST") return result as T
     }
-    private fun await(name: String, condition: ()->Boolean) {
-        val deadline=SystemClock.elapsedRealtime()+120_000
+    private fun await(name: String, timeoutMillis: Long=120_000, condition: ()->Boolean) {
+        val deadline=SystemClock.elapsedRealtime()+timeoutMillis
         while(SystemClock.elapsedRealtime()<deadline) {
             if(ui(condition)) return
             SystemClock.sleep(100)
@@ -46,6 +52,76 @@ class PreloadAcceptance: Instrumentation() {
     private fun player()=all().filterIsInstance<PlayerView>().single().player as ExoPlayer
     private fun manager()=activity.javaClass.declaredFields.firstOrNull { it.type==DefaultPreloadManager::class.java }
         ?.apply { isAccessible=true }?.get(activity) as? DefaultPreloadManager
+    private fun field(name: String)=activity.javaClass.getDeclaredField(name).apply { isAccessible=true }
+    @Suppress("UNCHECKED_CAST")
+    private fun preparedSlot()=field("preparedNext").get(activity) as PreparedSlot<RemoteVideo>
+    private fun preparedVideo()=preparedSlot().let { slot ->
+        slot.javaClass.getDeclaredField("value").apply { isAccessible=true }.get(slot) as? RemoteVideo
+    }
+    private fun videoDescription(p: ExoPlayer): String {
+        val format=p.videoFormat
+        return "${p.videoSize.width}x${p.videoSize.height} mime=${format?.sampleMimeType} codecs=${format?.codecs}"
+    }
+    /** A fresh RemoteVideo is closed before it has ever supplied samples to Media3. */
+    private fun failedPreparationIsDiscarded(p: ExoPlayer,manager: DefaultPreloadManager,next: MediaItem,type: String) {
+        val info=ui { requireNotNull(preparedVideo()).info }
+        val key=ui { field("prefetchedFor").get(activity) as String }
+        val previous=ui { p.currentMediaItem!!.mediaId }
+        ui { p.pause() }
+        val http=OkHttpClient.Builder().connectTimeout(10,TimeUnit.SECONDS).readTimeout(20,TimeUnit.SECONDS).callTimeout(30,TimeUnit.SECONDS).build()
+        var broken: RemoteVideo?=null
+        var failedItem: MediaItem?=null
+        var errorObserved=false
+        var endedAt=0L; var renderedAt=0L
+        val frameObserver=object: Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) { if(state==Player.STATE_ENDED) endedAt=SystemClock.elapsedRealtime() }
+            override fun onRenderedFirstFrame() { if(p.currentMediaItem?.mediaId==next.mediaId) renderedAt=SystemClock.elapsedRealtime() }
+        }
+        val observer=object: PreloadManagerListener {
+            override fun onError(exception: PreloadException) {
+                if(exception.mediaItem==failedItem) errorObserved=true
+            }
+        }
+        try {
+            val fresh=RemoteVideo(http,info).prepare()
+            broken=fresh
+            fresh.close()
+            ui {
+                activity.javaClass.getDeclaredMethod("cancelPrefetch",Boolean::class.javaPrimitiveType).apply { isAccessible=true }.invoke(activity,false)
+                val slot=preparedSlot()
+                val ticket=slot.begin(key)
+                check(slot.complete(ticket,key,fresh))
+                field("prefetchedFor").set(activity,key)
+                field("prefetchHttp").set(activity,http)
+                field("prefetchAttemptAt").setLong(activity,SystemClock.elapsedRealtime())
+                field("prefetchAttempts").setInt(activity,1)
+                val item=activity.javaClass.getDeclaredMethod("preloadItem",String::class.java,String::class.java,Long::class.javaPrimitiveType)
+                    .apply { isAccessible=true }.invoke(activity,next.mediaId,key,ticket) as MediaItem
+                failedItem=item
+                field("prefetchMediaItem").set(activity,item)
+                val source=activity.javaClass.getDeclaredMethod("videoSource",RemoteVideo::class.java,MediaItem::class.java)
+                    .apply { isAccessible=true }.invoke(activity,fresh,item) as MediaSource
+                val index=field("episodeIndex").getInt(activity)
+                manager.addListener(observer)
+                manager.add(source,index+1); manager.setCurrentPlayingIndex(index); manager.invalidate()
+                p.play()
+            }
+            // This is the actual loader callback, not a direct invocation of Activity error handling.
+            await("injected Media3 preload error",15_000) { errorObserved }
+            await("failed preparation eviction",1000) { preparedVideo()!==fresh }
+            check(ui { p.currentMediaItem?.mediaId==previous && p.isPlaying }) { "Next-source failure interrupted the current episode" }
+            ui { manager.removeListener(observer); p.addListener(frameObserver); p.seekTo((p.duration-1000).coerceAtLeast(0)) }
+            await("cold next episode after failed preload") {
+                renderedAt>0 && p.currentMediaItem?.mediaId==next.mediaId && p.isPlaying && p.videoSize.width>0 && p.currentPosition>1000
+            }
+            check(endedAt>0 && renderedAt>=endedAt) { "Missing actual failed-preload episode-end/frame timestamps" }
+            check(ui { player()===p && field("video").get(activity)!==fresh }) { "Failed prefetch was reused or forced player recovery" }
+            report.append("PASS $type: Media3 reported a fresh closed-source preload error; failed preparation evicted, current episode kept playing, next episode fetched again and rendered a new frame; end-to-first-frame=${renderedAt-endedAt}ms; ${ui { videoDescription(p) }}\n")
+        } finally {
+            ui { manager.removeListener(observer); p.removeListener(frameObserver) }
+            broken?.close(); http.dispatcher.cancelAll(); http.connectionPool.evictAll(); http.dispatcher.executorService.shutdown()
+        }
+    }
     private fun snapshot(name: String) {
         val bitmap=uiAutomation.takeScreenshot() ?: error("Screenshot unavailable")
         File(targetContext.getExternalFilesDir(null),"preload-acceptance/$name.png").apply {
@@ -70,12 +146,14 @@ class PreloadAcceptance: Instrumentation() {
                     break
                 }
                 val p=ui { player() }
+                report.append("INFO $type initial video: ${ui { videoDescription(p) }}\n")
                 val manager=ui { manager() } ?: error("Next episode never gets Media3 sample prebuffering; only raw-byte warm-up is available")
                 var completed: MediaItem?=null
                 ui { manager.addListener(object: PreloadManagerListener {
                     override fun onCompleted(mediaItem: MediaItem) { completed=mediaItem }
                 }) }
                 repeat(2) { round ->
+                    val previousFormat=ui { videoDescription(p) }
                     ui { p.seekTo((p.duration-25_000).coerceAtLeast(0)); p.play() }
                     await("official next-episode sample buffer") { completed!=null }
                     val next=completed!!
@@ -93,11 +171,17 @@ class PreloadAcceptance: Instrumentation() {
                     // Observe Media3's actual handoff flag, so preparing a fresh source cannot pass.
                     check(ui { source.javaClass.getDeclaredField("onUsedByPlayerNotified").apply { isAccessible=true }.getBoolean(source) }) { "Next episode discarded the preloaded MediaSource" }
                     check(ui { player()===p && manager.sourceCount==0 }) { "Handoff leaks the preload holder or rebuilds the player" }
-                    report.append("PASS $type round ${round+1}: real samples prebuffered, one next source, automatic handoff reused source/player; end-to-first-frame=${renderedAt-endedAt}ms\n")
+                    report.append("PASS $type round ${round+1}: real samples prebuffered, one next source, automatic handoff reused source/player; end-to-first-frame=${renderedAt-endedAt}ms; $previousFormat -> ${ui { videoDescription(p) }}\n")
                     ui { p.removeListener(listener) }; completed=null
                     key(KeyEvent.KEYCODE_MEDIA_PAUSE); check(ui { !p.playWhenReady }); key(KeyEvent.KEYCODE_MEDIA_PLAY)
                     await("resume") { p.isPlaying }
                 }
+                ui { p.seekTo((p.duration-25_000).coerceAtLeast(0)) }
+                await("next buffer before injected failure") { completed!=null }
+                val failureTarget=completed!!
+                completed=null
+                failedPreparationIsDiscarded(p,manager,failureTarget,type)
+                completed=null
                 ui { p.seekTo((p.duration-25_000).coerceAtLeast(0)) }
                 await("next buffer before cancellation") { completed!=null }
                 ui { activity.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) }

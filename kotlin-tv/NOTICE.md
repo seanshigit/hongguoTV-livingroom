@@ -38,6 +38,11 @@
 - 以上移植继续使用 GPL-3.0-only；APK 不包含参考 SDK、Node 运行时或 JavaScript 引擎。
 - 新增缓存回归的两段 AVC MP4 为本项目用 FFmpeg 生成的纯色测试样本，生成参数和用途见 `core/src/test/resources/media/README.md`。
 
+2026-11-22 连播兼容片源修复参考：
+
+- N3urda/hongguoTV [`ac3a1e2e866b2a917651575ba507adfe62344932`](https://github.com/N3urda/hongguoTV/tree/ac3a1e2e866b2a917651575ba507adfe62344932)，`MobilePlayback.kt`、`ContentRepository.kt`、`PlaybackModels.kt`：GET 仅提供 ByteVC2 时，保留同一匿名设备身份，向官方备用域名的当前 player 接口请求 `device_level=1` 的兼容模型。本分支只增加一次该 POST；空响应沿用原处理，业务拒绝、无效密钥及解密失败不触发新的兼容回退。
+- POST 延用上述独立 V5 签名器，对实际发送的 gzip 字节计算摘要并使用签名器返回的最终 URL；`playback-v5-post.json` 由上述固定 `92df757` 的未修改 JS 实现配合合成设备身份、固定 gzip 字节和固定随机数生成，覆盖四种时间戳变体的完整 POST 请求。原 GET 向量保持不变。新增移植继续以 GPL-3.0-only 发布。
+
 2026-10-17 对照 jackotom/hongguo-drama `v1.73` / [`84b6e88e65374942c123a53c7d6ad9e78bcd101b`](https://github.com/jackotom/hongguo-drama/tree/84b6e88e65374942c123a53c7d6ad9e78bcd101b)，播放接口实现相对上述版本未变化。参考其有限重试、取消与完整响应保护思路，为本客户端的内容及分段 GET 请求增加短退避；未引入桌面端运行时依赖。具体差异见 [核对记录](../docs/research/2026-10-17-upstream-iteration.md)。
 
 其他依赖：
