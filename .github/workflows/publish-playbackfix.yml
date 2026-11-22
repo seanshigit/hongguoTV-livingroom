@@ -1,0 +1,108 @@
+name: Publish verified playbackfix APK
+
+on:
+  create:
+  push:
+    branches: ['release/playbackfix-*']
+  pull_request:
+    paths:
+      - '.github/workflows/publish-playbackfix.yml'
+      - 'kotlin-tv/distribution/publish-playbackfix.py'
+      - 'kotlin-tv/distribution/test_publish_playbackfix.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playbackfix-publication
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.event_name == 'pull_request'
+      || (
+        github.repository == 'seanshigit/hongguoTV-livingroom'
+        && startsWith(github.ref, 'refs/heads/release/playbackfix-')
+        && (
+          (github.event_name == 'create' && github.event.ref_type == 'branch')
+          || (github.event_name == 'push' && github.event.created != true)
+          || github.event_name == 'workflow_dispatch'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify publisher regression checks
+        run: python3 -m unittest discover -s kotlin-tv/distribution -p 'test_*playbackfix.py'
+  publish:
+    needs: verify
+    if: >-
+      github.repository == 'seanshigit/hongguoTV-livingroom'
+      && startsWith(github.ref, 'refs/heads/release/playbackfix-')
+      && (
+        (github.event_name == 'create' && github.event.ref_type == 'branch')
+        || (github.event_name == 'push' && github.event.created != true)
+        || github.event_name == 'workflow_dispatch'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check candidate branch and fetch its exact verified source
+        run: |
+          python3 - <<'PY'
+          import ast, os, re, subprocess
+          from pathlib import Path
+          candidate = {}
+          module = ast.parse(Path('kotlin-tv/distribution/publish-playbackfix.py').read_text())
+          for node in module.body:
+              if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                  name = node.targets[0].id
+                  if name in {'VERSION', 'SOURCE_COMMIT'}:
+                      if name in candidate:
+                          raise SystemExit('Duplicate fixed candidate constant')
+                      candidate[name] = ast.literal_eval(node.value)
+          version = candidate.get('VERSION', '')
+          source = candidate.get('SOURCE_COMMIT', '')
+          if not isinstance(version, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-playbackfix', version):
+              raise SystemExit('Invalid fixed candidate version')
+          if not isinstance(source, str) or not re.fullmatch('[0-9a-f]{40}', source):
+              raise SystemExit('Invalid fixed source commit')
+          expected_ref = 'refs/heads/release/playbackfix-' + version.removesuffix('-playbackfix')
+          if os.environ['GITHUB_REF'] != expected_ref:
+              raise SystemExit('This branch does not match the reviewed release candidate')
+          subprocess.run(['git', 'fetch', '--no-tags', 'origin', source], check=True)
+          PY
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: 'build-tools;36.0.0'
+      - name: Verify fixed APK, publish assets, then promote update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 kotlin-tv/distribution/publish-playbackfix.py
+          --input .release-input/playbackfix
+          --build-tools "$ANDROID_HOME/build-tools/36.0.0"
+          --output "$RUNNER_TEMP/playbackfix-release"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: playbackfix-publication-evidence
+          path: ${{ runner.temp }}/playbackfix-release/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -34,6 +34,8 @@
 
 原版自动更新功能原本已经存在；目前缺少可覆盖原版的同签名修复 APK。修复版的清单和 Release 必须独立发布，不能替换原版 `latest/update.json`。源码合并、APK 构建和公开渠道发布是不同步骤，具体发布状态以 [更新说明](kotlin-tv/AUTO_UPDATES.md) 为准。
 
+原版签名私钥丢失时，使用保留固定签名的播放修复版作为后续更新版本；先通过现有手机备份入口迁移本机记录，再接收同签名更新。请保留旧版直到记录核对完成。[一次性迁移步骤与账号数据范围](kotlin-tv/MIGRATION_TO_PLAYBACKFIX.md)
+
 既往预加载验收和测试时延见 [0.13 记录](kotlin-tv/RELEASE_0.13.0-local.md)，自动更新设计见 [0.12 记录](kotlin-tv/RELEASE_0.12.0-local.md)。账号同步的真实手机与 Android TV 模拟器验收范围见本版记录；实体电视、Android 8 实机及全部片源未逐一验收。
 
 ## 构建

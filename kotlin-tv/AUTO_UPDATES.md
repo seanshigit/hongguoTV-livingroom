@@ -13,6 +13,8 @@
 
 ## 现有用户如何接入
 
+原版签名私钥已经丢失时，无法为现有原版制作同签名覆盖包。后续使用固定签名的播放修复版；本机记录可以通过现有 JSON 备份迁移，账号记录及账号本地标记的范围不同。详见 [一次性迁移步骤](MIGRATION_TO_PLAYBACKFIX.md)，核对完成前保留原版。
+
 - **仍在使用原版：** 原版的自动更新功能保留，但原版无法覆盖安装不同包名或不同签名的 APK。原版签名证书 SHA-256 为 `2a569cd27ab064123d8a407442d87931abfdca3329e0c1889a44929060f2718a`；恢复匹配的私钥后才能继续向原版推送覆盖升级。播放修复版可另行安装并保留原版，通过两边「设置 → 手机备份与恢复」迁移本机记录；账号需要重新登录。
 - **已安装 0.14.16-playbackfix：** 该版为独立安装包，尚未开启自己的更新器。因此需要一次手动、同签名覆盖安装 `0.14.18-playbackfix` 或后续版本，之后才可使用专用通道。覆盖同包名的播放修复版保留其已有数据，不要卸载后重装。
 - **已安装 0.14.17-playbackfix 或后续版：** 在已发布专用清单和同签名新版 APK 的前提下，可自动检查下载，或从「设置 → 版本与更新」手动检查。切勿把播放修复版清单发布到原版的 latest 或 KVM 路径。
@@ -83,7 +85,26 @@ https://raw.githubusercontent.com/seanshigit/hongguoTV-livingroom/updates/playba
 
 6. 核对专用清单的包名、版本、大小、摘要和 APK 附件，并再次确认原版 `latest/download/update.json` 及原版 KVM 清单未发生变化。播放修复版没有新 KVM 镜像，本轮不修改或启用服务器镜像任务。
 
-`distribution/release.yml` 和 `distribution/publish-tv-update.py` 是旧发布模板，包含旧版本、旧证书及旧脚本路径，不能直接用于以上任一渠道。实际发布应使用经过核对的固定签名和本工具生成的清单。
+### 使用 GitHub Actions 发布已验证的修复包
+
+`.github/workflows/publish-playbackfix.yml` 与 `distribution/publish-playbackfix.py` 为受限的已签名安装包发布流程。当前只接受 `0.14.18-playbackfix` 的固定包名、版本、字节数、SHA-256、签名证书及已通过 CI 的构建来源 `823eb97916f3878cd3402e0e006d8cce909114dd`。该来源的源码树与已合并的连播修复相同；不能用后来加入发布工作流的提交冒充 APK 构建来源。
+
+流程先经 PR 校验、合并，再建立完整的 `release/playbackfix-0.14.18` 分支。此分支只增加可公开的 `.release-input/playbackfix/hongguotv-0.14.18-playbackfix-android8.apk`，不包含 keystore、密码或个人备份。签名私钥保留在私有位置，GitHub Actions 只接收已经签好的 APK。
+
+工作流在指定分支创建时执行；后续向该分支推送或手动运行可用于重试。流程依次完成：
+
+1. 核对固定构建来源及其 Android CI，使用 `apksigner` 和 `aapt` 校验实际 APK；从该精确提交导出源码。
+2. 创建非 latest 的 Release 草稿，上传 APK、对应源码、`playbackfix.json` 和 `SHA256SUMS`，校验 GitHub 返回的附件长度和摘要。
+3. 以 `make_latest=false` 公开 Release；无凭据重新下载公开附件并核对字节数和 SHA-256，确认原版 latest 没有被替换。
+4. 最后更新 `updates` 分支的独立清单。已有更高版本、同版本不同摘要、附件不匹配、CI 失败或权限不足时停止。分支更新不使用强制覆盖，冲突不会删除其他修改。
+
+已公开的同 tag 附件只核验复用，不会覆盖。失败后可以从相同候选重试；尚未通过公开下载核对的候选不会被写进客户端清单。源码和发布说明以真正的构建来源为准，而非放置 APK 的分支。
+
+后续版本先完成固定签名构建与源码测试，再通过 PR 更新 Python 脚本中的候选常量，校验通过后创建该版本对应的完整发布分支。工作流只接收本仓库 `release/playbackfix-*` 分支，并在获得发布步骤的令牌前核对分支必须等于固定候选版本；普通版本发布无需修改工作流文件。
+
+保持工作流稳定也确保实际构建来源相对默认分支不新增或修改工作流文件：GitHub 对这种差异要求额外的 Workflows 写权限，而 Actions 的 `GITHUB_TOKEN` 不能获得该权限。不得为了发布成功更换 APK 的来源提交或绕过拒绝。不能把上游任意提交、临时 Debug 签名或未经验证的 APK 自动推入此渠道。此流程需要仓库已有的 GitHub Actions 与 Contents 发布权限；如果权限或分支保护拒绝操作，应保留已完成产物并报告阻塞，不改变保护规则。
+
+`distribution/release.yml` 和 `distribution/publish-tv-update.py` 仍是旧发布模板，包含旧版本、旧证书及旧脚本路径，不能用于以上任一渠道。
 
 ## 验证发布准备工具
 
