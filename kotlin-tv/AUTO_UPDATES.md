@@ -9,6 +9,11 @@
 | `legacy`，工具默认 | `com.hongguotv.nativeapp` | 原 Release `latest/download/update.json`；失败时尝试现有 KVM | 必须延续原版签名；新的原版 Release 才可设为 latest |
 | `playbackfix` | `com.hongguotv.nativeapp.playbackfix` | 固定为 `https://raw.githubusercontent.com/seanshigit/hongguoTV-livingroom/updates/playbackfix.json` | 必须延续播放修复版签名；Release 不得设为 latest，不接入原版 KVM |
 
+## 2026-11-23 公开发布状态与签名验收边界
+
+- GitHub `releases/latest` 已指向 [`tv-v0.14.18-local`](https://github.com/seanshigit/hongguoTV-livingroom/releases/tag/tv-v0.14.18-local)，其发布说明称 `com.hongguotv.nativeapp` 沿用 0.14.15 原签名，可从 versionCode 30 升至 33。下文“原私钥丢失”是先前状态记录，不能代替对**当前发布的实际 APK**验签。正式告知旧版用户可以保留数据覆盖前，须用 `apksigner verify --print-certs` 核实两个 APK 的包名及相同签名证书 `2a569cd27ab064123d8a407442d87931abfdca3329e0c1889a44929060f2718a`、版本递增，并实测原版 `latest/download/update.json`、实际下载和安装；未验收时不要让用户卸载旧版。
+- 独立修复版 [`tv-v0.14.18-playbackfix`](https://github.com/seanshigit/hongguoTV-livingroom/releases/tag/tv-v0.14.18-playbackfix) 已公开，专用 `updates/playbackfix.json` 现指向 `versionCode 33`、9,540,418 字节、SHA-256 `3983497cf74adf58832c41f6f58844b79496b4f3be47cd81e5722c8755a8eb10` 的 APK。该发布是独立渠道，不能用于覆盖原版。实体电视连播、硬件解码和更新安装仍须分别验收。
+
 播放修复版从 `0.14.17-playbackfix / versionCode 32` 开始支持自己的更新清单。清单位于专用 `updates` 分支的 `playbackfix.json`，APK 来自该清单指向的本仓库 Release。源码中的渠道支持不代表安装包与清单已发布；实际可用版本以公开附件和对应清单为准。
 
 ## 现有用户如何接入
