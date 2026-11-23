@@ -122,7 +122,7 @@ class ContentRepositoryTest {
     @Test fun streamRetriesAnEmptyProviderResponseWithAFreshSignedRequest() {
         var calls=0
         val repo=repository { request ->
-            if(request.url.host.contains("fqnovel")) {
+            if(request.url.host in listOf("api5-normal-sinfonlineb.fqnovel.com", "reading.snssdk.com")) {
                 calls++
                 if(calls<2) "" else JSONObject().put("code",0).put("data",JSONObject().put("123",JSONObject().put("video_model",
                     JSONObject().put("fallback_api","https://example.com/good")))).toString()

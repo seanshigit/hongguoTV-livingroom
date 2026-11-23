@@ -40,15 +40,15 @@ class PlaybackRequestRecoveryTest {
     }
 
     @Test
-    fun emptyPrimaryResponseTriesLegacyPathOnTheSameOfficialHost() {
+    fun emptyPrimaryResponseTriesCurrentPreloadEndpoint() {
         val paths = mutableListOf<String>()
         val http = client { request ->
-            assertEquals("api5-normal-sinfonlineb.fqnovel.com",request.url.host)
+            assertEquals(if (request.method == "GET") "api5-normal-sinfonlineb.fqnovel.com" else "reading.snssdk.com", request.url.host)
             paths += request.url.encodedPath
             if (request.method == "POST") model else ""
         }
         assertEquals("https://example.test/video", ContentRepository(http, playbackSession = session).stream("123").url)
-        assertEquals(listOf("/reading/bookapi/video_tab/multi_video_model/v1/", "/novel/player/multi_video_model/v1/"), paths)
+        assertEquals(listOf("/reading/bookapi/video_tab/multi_video_model/v1/", "/novel/player/multi_video_model/preload/v1"), paths)
     }
 
     @Test
