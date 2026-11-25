@@ -2,7 +2,7 @@
 
 面向 Android TV / 电视盒子的红果短剧与漫剧客户端，采用 **Kotlin 原生 View + Media3**。Android 8.0 起可用，安装 APK 后直接联网，无需部署 Node 或 Docker 服务。
 
-**0.14.19** 修复短剧和漫剧取流返回空正文的问题。播放请求更新到 7.4.5.32 和当前 V5 签名；GET 返回空正文时尝试一次 V5 preload POST。遇到仅提供 ByteVC2 的模型，可使用片源提供的兼容编码接口。[上游 Kotlin 修复](https://github.com/N3urda/hongguoTV/pull/107) · [连播修复记录](kotlin-tv/RELEASE_0.14.18-playbackfix.md)
+**0.14.20** 补齐 V5 播放签名的设备字段，恢复短剧和漫剧取流。GET 返回空正文时尝试一次 V5 preload POST，遇到仅提供 ByteVC2 的模型时协商兼容编码。[上游签名变更](https://github.com/N3urda/hongguoTV/pull/122)
 
 「红果 TV 原生版」与「红果 TV 播放修复版」使用各自的包名、签名和更新清单，可同时安装。[更新说明](kotlin-tv/AUTO_UPDATES.md)
 
@@ -28,9 +28,9 @@
 
 ## 安装与验证
 
-此源码的版本号为 `0.14.19-local` / versionCode `34`，默认构建包名为 `com.hongguotv.nativeapp`。正式覆盖升级使用原版的发布签名，从 [原版更新清单](https://github.com/seanshigit/hongguoTV-livingroom/releases/latest/download/update.json) 获取。
+此源码的版本号为 `0.14.20-local` / versionCode `35`，默认构建包名为 `com.hongguotv.nativeapp`。正式覆盖升级使用原版的发布签名，从 [原版更新清单](https://github.com/seanshigit/hongguoTV-livingroom/releases/latest/download/update.json) 获取。
 
-使用 `-Phongguotv.sideBySide=true` 构建的版本名为 `0.14.19-playbackfix`，包名为 `com.hongguotv.nativeapp.playbackfix`。正式覆盖升级须使用该包自己的发布签名，以 [独立更新清单](https://raw.githubusercontent.com/seanshigit/hongguoTV-livingroom/updates/playbackfix.json) 为准。
+使用 `-Phongguotv.sideBySide=true` 构建的包名为 `com.hongguotv.nativeapp.playbackfix`。正式覆盖升级须使用该包自己的发布签名，以 [独立更新清单](https://raw.githubusercontent.com/seanshigit/hongguoTV-livingroom/updates/playbackfix.json) 为准。
 
 需要切换包名时，可通过「设置 → 手机备份与恢复」迁移本机收藏和观看记录，账号需要重新登录。[迁移步骤与数据范围](kotlin-tv/MIGRATION_TO_PLAYBACKFIX.md)
 
