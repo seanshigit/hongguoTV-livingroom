@@ -19,8 +19,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = System.getenv("HONGGUOTV_TEST_RUNNER") ?: "com.hongguotv.nativeapp.TvAcceptance"
-        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: 34
-        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: if (sideBySide) "0.14.19-playbackfix" else "0.14.19-local"
+        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: 35
+        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: if (sideBySide) "0.14.20-playbackfix" else "0.14.20-local"
         manifestPlaceholders["appLabel"] = if (sideBySide) "红果 TV 播放修复版" else "红果 TV 原生版"
         buildConfigField("boolean", "SIDE_BY_SIDE", sideBySide.toString())
     }
